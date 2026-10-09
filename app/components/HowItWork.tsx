@@ -1,0 +1,73 @@
+import { Camera, Scissors, ClipboardCheck, LucideIcon } from "lucide-react";
+import React from "react";
+
+type Step = {
+  number: number;
+  icon: LucideIcon;
+  title: string;
+  description: string;
+};
+
+const STEPS: Step[] = [
+  {
+    number: 1,
+    icon: Camera,
+    title: "Upload or click your photo",
+    description:
+      "Take a selfie or upload from your gallery. A simple front-facing photo works best",
+  },
+  {
+    number: 2,
+    icon: Scissors,
+    title: "Pick a hairstyle",
+    description:
+      "Choose from styles that match your choice, face shape and age. Our AI is built for Indian faces, features, and hair types",
+  },
+  {
+    number: 3,
+    icon: ClipboardCheck,
+    title: "See your result",
+    description:
+      "Your AI transformation appears instantly. Download it, share it, or connect with our expert to make it real",
+  },
+];
+
+const HowItWorks = () => {
+  return (
+    <section className="w-full px-4">
+      <h2 className="text-2xl md:text-4xl font-semibold text-foreground text-center">
+        How It Works
+      </h2>
+      <div className="container mx-auto grid max-w-7xl grid-cols-1 gap-8 md:grid-cols-3 mt-10">
+        {STEPS.map((step) => (
+          <StepCard key={step.number} step={step} />
+        ))}
+      </div>
+    </section>
+  );
+};
+
+const StepCard = ({ step }: { step: Step }) => {
+  const { number, icon: Icon, title, description } = step;
+  return (
+    <div className="relative rounded-3xl px-8 pb-12 pt-14 bg-gray-100/50">
+      <div className="absolute -left-2 -top-2 flex size-10 items-center justify-center rounded-full bg-white text-base font-medium text-green-600 shadow-md">
+        {number}
+      </div>
+
+      <div className="flex flex-col items-center text-center">
+        <div className="flex size-16 items-center justify-center rounded-full bg-green-100">
+          <Icon className="size-8 text-green-600" strokeWidth={2} />
+        </div>
+
+        <h3 className="mt-6 text-lg font-semibold text-foreground">{title}</h3>
+
+        <p className="mt-4 md:text-lg leading-relaxed text-muted-foreground text-pretty">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+export default HowItWorks;
