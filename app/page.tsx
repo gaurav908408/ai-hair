@@ -12,6 +12,10 @@ export default function Home() {
       <br />
       <br />
       <HowItWorks/>
+      <br />
+      <br />
+      <br />
+      <br />
       <HairTransformation/>
       <AssessmentGoogleReviews />
        
