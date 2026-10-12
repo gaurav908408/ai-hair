@@ -2,36 +2,43 @@ import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
 
 export const runtime = "nodejs";
+// Allow up to 60 seconds for serverless function execution on Vercel
+export const maxDuration = 60;
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
 
 // Official AILabTools Hairstyle Editor Pro supported hairstyle IDs
-export const SUPPORTED_AILAB_HAIRSTYLES: Record<string, { name: string; file: string; apiId: string }> = {
-  "comb-over": { name: "Comb Over", file: "CombOver.webp", apiId: "CombOver" },
-  "faux-hawk": { name: "Faux Hawk", file: "FauxHawk.webp", apiId: "FauxHawk" },
-  "high-tight-fade": { name: "High Tight Fade", file: "HighTightFade.webp", apiId: "HighTightFade" },
-  "low-fade": { name: "Low Fade", file: "LowFade.webp", apiId: "LowFade" },
-  pompadour: { name: "Pompadour", file: "Pompadour.webp", apiId: "Pompadour" },
-  "slick-back": { name: "Slick Back", file: "SlickBack.webp", apiId: "SlickBack" },
-  "textured-fringe": { name: "Textured Fringe", file: "TexturedFringe.webp", apiId: "TexturedFringe" },
+export const SUPPORTED_AILAB_HAIRSTYLES: Record<
+  string,
+  { name: string; file: string; apiId: string; legacyId?: number }
+> = {
+  "comb-over": { name: "Comb Over", file: "CombOver.webp", apiId: "CombOver", legacyId: 401 },
+  "faux-hawk": { name: "Faux Hawk", file: "FauxHawk.webp", apiId: "FauxHawk", legacyId: 401 },
+  "high-tight-fade": { name: "High Tight Fade", file: "HighTightFade.webp", apiId: "HighTightFade", legacyId: 603 },
+  "low-fade": { name: "Low Fade", file: "LowFade.webp", apiId: "LowFade", legacyId: 603 },
+  pompadour: { name: "Pompadour", file: "Pompadour.webp", apiId: "Pompadour", legacyId: 401 },
+  "slick-back": { name: "Slick Back", file: "SlickBack.webp", apiId: "SlickBack", legacyId: 401 },
+  "textured-fringe": { name: "Textured Fringe", file: "TexturedFringe.webp", apiId: "TexturedFringe", legacyId: 101 },
   "undercut-long-hair": {
     name: "Undercut Long Hair",
     file: "UndercutLongHair copy.webp",
     apiId: "UndercutLongHair",
+    legacyId: 201,
   },
   // Direct API IDs
-  CombOver: { name: "Comb Over", file: "CombOver.webp", apiId: "CombOver" },
-  FauxHawk: { name: "Faux Hawk", file: "FauxHawk.webp", apiId: "FauxHawk" },
-  HighTightFade: { name: "High Tight Fade", file: "HighTightFade.webp", apiId: "HighTightFade" },
-  LowFade: { name: "Low Fade", file: "LowFade.webp", apiId: "LowFade" },
-  Pompadour: { name: "Pompadour", file: "Pompadour.webp", apiId: "Pompadour" },
-  SlickBack: { name: "Slick Back", file: "SlickBack.webp", apiId: "SlickBack" },
-  TexturedFringe: { name: "Textured Fringe", file: "TexturedFringe.webp", apiId: "TexturedFringe" },
+  CombOver: { name: "Comb Over", file: "CombOver.webp", apiId: "CombOver", legacyId: 401 },
+  FauxHawk: { name: "Faux Hawk", file: "FauxHawk.webp", apiId: "FauxHawk", legacyId: 401 },
+  HighTightFade: { name: "High Tight Fade", file: "HighTightFade.webp", apiId: "HighTightFade", legacyId: 603 },
+  LowFade: { name: "Low Fade", file: "LowFade.webp", apiId: "LowFade", legacyId: 603 },
+  Pompadour: { name: "Pompadour", file: "Pompadour.webp", apiId: "Pompadour", legacyId: 401 },
+  SlickBack: { name: "Slick Back", file: "SlickBack.webp", apiId: "SlickBack", legacyId: 401 },
+  TexturedFringe: { name: "Textured Fringe", file: "TexturedFringe.webp", apiId: "TexturedFringe", legacyId: 101 },
   UndercutLongHair: {
     name: "Undercut Long Hair",
     file: "UndercutLongHair copy.webp",
     apiId: "UndercutLongHair",
+    legacyId: 201,
   },
 };
 
@@ -40,20 +47,27 @@ export const SUPPORTED_AILAB_HAIRSTYLES: Record<string, { name: string; file: st
  */
 async function generateWithAILab(
   photo: File,
-  hairstyle: { name: string; file: string; apiId: string },
+  hairstyle: { name: string; file: string; apiId: string; legacyId?: number },
   apiKey: string,
   endpointUrl: string,
 ): Promise<NextResponse> {
+  const isProEndpoint = !endpointUrl.endsWith("/hairstyle-editor");
+
   const imageBytes = await photo.arrayBuffer();
+  const mimeType = photo.type || "image/jpeg";
+  const fileName = photo.name || (mimeType === "image/png" ? "portrait.png" : "portrait.jpg");
+
   const formData = new FormData();
-  formData.append(
-    "image",
-    new Blob([imageBytes], { type: photo.type }),
-    photo.name || "portrait.jpg",
-  );
-  // Important: The parameter name MUST be "hair_style" (not hair_type)
-  // and the value must be a valid supported hairstyle ID like "TexturedFringe"
-  formData.append("hair_style", hairstyle.apiId);
+  if (isProEndpoint) {
+    // Hairstyle Changer Pro contract: 'image', 'hair_style', and 'task_type'="async"
+    formData.append("image", new Blob([imageBytes], { type: mimeType }), fileName);
+    formData.append("hair_style", hairstyle.apiId);
+    formData.append("task_type", "async");
+  } else {
+    // Legacy Hairstyle Changer contract: 'image_target' and numeric 'hair_type'
+    formData.append("image_target", new Blob([imageBytes], { type: mimeType }), fileName);
+    formData.append("hair_type", String(hairstyle.legacyId ?? 101));
+  }
 
   let response: Response;
   try {
@@ -64,43 +78,74 @@ async function generateWithAILab(
       },
       body: formData,
     });
-  } catch (err) {
-    console.error("AI Lab connection error:", err);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[AILabTools] Connection error:", errorMsg);
     return NextResponse.json(
       { error: "Could not connect to the AI Lab hairstyle service. Please check your network and try again." },
       { status: 502 },
     );
   }
 
-  const result = (await response.json().catch(() => null)) as {
-    error_code?: number;
-    error_code_str?: string;
-    error_msg?: string;
-    error_detail?: {
-      code?: string;
-      message?: string;
-      code_message?: string;
-    };
-    task_id?: string;
-    task_type?: string;
-    data?: {
-      image_url?: string;
-      images?: string[];
-      image?: string;
-      result_image?: string;
-    };
-  } | null;
+  const rawText = await response.text();
+  let result: Record<string, unknown> | null = null;
+  try {
+    result = JSON.parse(rawText) as Record<string, unknown>;
+  } catch {
+    // Upstream returned non-JSON body
+  }
 
-  // Handle immediate 422 or API submission error
-  if (!response.ok || (result && result.error_code && result.error_code !== 0)) {
-    console.error("AI Lab API Error Response:", JSON.stringify(result, null, 2));
+  // Safe server-side telemetry: never log raw API keys or binary image contents
+  const errorCode =
+    (result?.error_detail as { code?: string } | undefined)?.code ||
+    (result?.error_code_str as string | undefined) ||
+    (typeof result?.error_code === "number" && result.error_code !== 0
+      ? String(result.error_code)
+      : undefined);
 
-    const errorCode = result?.error_detail?.code || result?.error_code_str;
-    let userMessage = result?.error_detail?.message || result?.error_msg || "The AI Lab hairstyle service could not process this photo.";
+  const errorMsg =
+    (result?.error_detail as { message?: string; code_message?: string } | undefined)?.message ||
+    (result?.error_detail as { message?: string; code_message?: string } | undefined)?.code_message ||
+    (result?.error_msg as string | undefined) ||
+    (result?.message as string | undefined) ||
+    (result?.error as string | undefined);
 
-    if (errorCode === "ERROR_NO_FACE_IN_FILE" || userMessage.toLowerCase().includes("no face detected")) {
+  const requestId = (result?.request_id as string | undefined) || "N/A";
+  const logId = (result?.log_id as string | undefined) || "N/A";
+
+  console.log(
+    `[AILabTools] Submission Response - Status: ${response.status}, Request ID: ${requestId}, Log ID: ${logId}, Error Code: ${errorCode ?? 0}, Error Msg: ${errorMsg ?? "None"}`
+  );
+
+  // Handle immediate upstream failure (HTTP 4xx/5xx or non-zero error_code)
+  if (!response.ok || (typeof result?.error_code === "number" && result.error_code !== 0)) {
+    console.error(
+      `[AILabTools] Submission Error Details - Status: ${response.status}, Request ID: ${requestId}, Log ID: ${logId}, Code: ${errorCode ?? "N/A"}, Msg: ${errorMsg ?? "N/A"}`
+    );
+
+    let userMessage = errorMsg || "The AI Lab hairstyle service could not process this photo.";
+
+    if (response.status === 401 || userMessage.toLowerCase().includes("invalid api key")) {
+      userMessage = "Invalid or unauthorized AILabTools API key. Please verify your AILABAPI_API_KEY configuration in Vercel.";
+    } else if (
+      response.status === 403 ||
+      errorCode === "NO_AVAILABLE_BALANCE" ||
+      userMessage.toLowerCase().includes("balance") ||
+      userMessage.toLowerCase().includes("quota")
+    ) {
+      userMessage = "AILabTools quota or account balance exhausted. Please check your AILabTools credits.";
+    } else if (response.status === 404 || errorCode === "ERROR_AI_NOT_EXISTS") {
+      userMessage = `AILabTools endpoint not found or deactivated (${endpointUrl}).`;
+    } else if (
+      errorCode === "ERROR_NO_FACE_IN_FILE" ||
+      userMessage.toLowerCase().includes("no face detected") ||
+      userMessage.toLowerCase().includes("no face")
+    ) {
       userMessage = "No face detected in the photo. Please upload a clear, front-facing portrait.";
-    } else if (errorCode === "UNSUPPORTED_PARAMETER_VALUES" || userMessage.toLowerCase().includes("hair_style")) {
+    } else if (
+      errorCode === "UNSUPPORTED_PARAMETER_VALUES" ||
+      userMessage.toLowerCase().includes("hair_style")
+    ) {
       userMessage = `Unsupported hairstyle selection: "${hairstyle.name}". Please choose another style.`;
     }
 
@@ -109,17 +154,18 @@ async function generateWithAILab(
   }
 
   // If sync result with immediate image
-  const immediateBase64 = result?.data?.image || result?.data?.result_image;
+  const dataObj = result?.data as Record<string, unknown> | undefined;
+  const immediateBase64 = (dataObj?.image as string | undefined) || (dataObj?.result_image as string | undefined);
   if (immediateBase64) {
     const cleanB64 = immediateBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
     return NextResponse.json({ image: `data:image/png;base64,${cleanB64}` });
   }
 
   // If async task, poll query endpoint
-  if (result?.task_id) {
-    const taskId = result.task_id;
+  const taskId = result?.task_id as string | undefined;
+  if (taskId) {
     const queryEndpoint = "https://www.ailabapi.com/api/common/query-async-task-result";
-    const maxPollAttempts = 25; // Poll up to ~40-50 seconds
+    const maxPollAttempts = 25; // Poll up to ~40-45 seconds
     const pollIntervalMs = 1800;
 
     for (let attempt = 1; attempt <= maxPollAttempts; attempt++) {
@@ -130,30 +176,39 @@ async function generateWithAILab(
         queryRes = await fetch(`${queryEndpoint}?task_id=${encodeURIComponent(taskId)}`, {
           headers: { "ailabapi-api-key": apiKey },
         });
-      } catch (err) {
-        console.error(`AI Lab polling attempt ${attempt} network error:`, err);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[AILabTools] Polling attempt ${attempt} network warning:`, msg);
         continue;
       }
 
-      const queryData = (await queryRes.json().catch(() => null)) as {
-        task_status?: number; // 0: queued, 1: processing, 2: success, 3: failed
-        error_code?: number;
-        error_detail?: { code?: string; message?: string };
-        error_msg?: string;
-        data?: {
-          images?: string[];
-          image_url?: string;
-          result_image?: string;
-        };
-      } | null;
+      const queryRaw = await queryRes.text();
+      let queryData: Record<string, unknown> | null = null;
+      try {
+        queryData = JSON.parse(queryRaw) as Record<string, unknown>;
+      } catch {
+        console.warn(`[AILabTools] Polling attempt ${attempt} non-JSON response:`, queryRaw);
+        continue;
+      }
 
-      // Check for failure
-      if (queryData?.task_status === 3 || (queryData?.error_code && queryData.error_code !== 0)) {
-        console.error("AI Lab task failed:", JSON.stringify(queryData, null, 2));
-        const errorCode = queryData?.error_detail?.code;
-        let failMessage = queryData?.error_detail?.message || queryData?.error_msg || "Hairstyle processing failed.";
+      const pollErrorDetail = queryData?.error_detail as { code?: string; message?: string; code_message?: string } | undefined;
+      const pollTaskStatus = queryData?.task_status as number | undefined;
+      const pollErrorCode = queryData?.error_code as number | undefined;
 
-        if (errorCode === "ERROR_NO_FACE_IN_FILE" || failMessage.toLowerCase().includes("no face")) {
+      // Check for async task failure (task_status === 3 or non-zero error_code)
+      if (pollTaskStatus === 3 || (typeof pollErrorCode === "number" && pollErrorCode !== 0)) {
+        console.error(
+          `[AILabTools] Async Task Failed - Task ID: ${taskId}, Status: ${pollTaskStatus}, Code: ${pollErrorCode}, Msg: ${queryData?.error_msg || pollErrorDetail?.message}`
+        );
+        const pollCode = pollErrorDetail?.code;
+        let failMessage =
+          pollErrorDetail?.message ||
+          pollErrorDetail?.code_message ||
+          (queryData?.error_msg as string | undefined) ||
+          (queryData?.message as string | undefined) ||
+          "Hairstyle processing failed.";
+
+        if (pollCode === "ERROR_NO_FACE_IN_FILE" || failMessage.toLowerCase().includes("no face")) {
           failMessage = "No face detected in the photo. Please upload a clear, front-facing portrait.";
         }
 
@@ -161,11 +216,20 @@ async function generateWithAILab(
       }
 
       // Check for success (task_status === 2 or data with image available)
+      const pollData = queryData?.data as Record<string, unknown> | undefined;
+      const pollImages = pollData?.images as string[] | undefined;
       const imageUrl =
-        queryData?.data?.images?.[0] ||
-        queryData?.data?.image_url;
+        pollImages?.[0] ||
+        (pollData?.image_url as string | undefined) ||
+        (pollData?.result_image as string | undefined);
+      const base64Image = pollData?.image as string | undefined;
 
-      if (queryData?.task_status === 2 || imageUrl) {
+      if (pollTaskStatus === 2 || imageUrl || base64Image) {
+        if (base64Image) {
+          const cleanB64 = base64Image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+          return NextResponse.json({ image: `data:image/png;base64,${cleanB64}` });
+        }
+
         if (!imageUrl) {
           return NextResponse.json(
             { error: "AI Lab returned a success status but no image URL was found." },
@@ -174,17 +238,20 @@ async function generateWithAILab(
         }
 
         try {
-          const imgFetch = await fetch(imageUrl);
+          const imgFetch = await fetch(imageUrl, {
+            signal: AbortSignal.timeout(15000),
+          });
           if (!imgFetch.ok) {
-            throw new Error(`Failed to download result image from ${imageUrl}`);
+            throw new Error(`Failed to download result image from CDN (HTTP ${imgFetch.status})`);
           }
           const imgBuffer = await imgFetch.arrayBuffer();
           const base64 = Buffer.from(imgBuffer).toString("base64");
           return NextResponse.json({ image: `data:image/png;base64,${base64}` });
-        } catch (downloadErr) {
-          console.error("Download generated image error:", downloadErr);
+        } catch (downloadErr: unknown) {
+          const msg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
+          console.error("[AILabTools] Download generated image error:", msg);
           return NextResponse.json(
-            { error: "Could not download the generated hairstyle image from AI Lab." },
+            { error: "Could not download the generated hairstyle image from AI Lab CDN." },
             { status: 502 },
           );
         }
@@ -198,13 +265,13 @@ async function generateWithAILab(
   }
 
   return NextResponse.json(
-    { error: "The AI Lab hairstyle service returned no result image. Please try again." },
+    { error: "The AI Lab hairstyle service returned no task or result image. Please try again." },
     { status: 502 },
   );
 }
 
 /**
- * Generate hairstyle using official OpenAI SDK
+ * Generate hairstyle using official OpenAI SDK (fallback provider)
  */
 async function generateWithOpenAI(
   photo: File,
@@ -236,12 +303,14 @@ async function generateWithOpenAI(
     }
 
     return NextResponse.json({ image: `data:image/png;base64,${b64}` });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errObj = error as { message?: string; status?: number };
     const message =
-      error?.message || "The OpenAI image generation service could not process this photo.";
-    const status = typeof error?.status === "number" && error.status >= 400 && error.status < 600
-      ? error.status
-      : 502;
+      errObj?.message || "The OpenAI image generation service could not process this photo.";
+    const status =
+      typeof errObj?.status === "number" && errObj.status >= 400 && errObj.status < 600
+        ? errObj.status
+        : 502;
     return NextResponse.json({ error: message }, { status });
   }
 }
@@ -255,18 +324,38 @@ export async function POST(request: Request) {
     );
   }
 
-  const aiLabApiKey = process.env.AILABAPI_API_KEY;
-  const aiLabEndpoint =
+  // Support all common variable naming variations and sanitize quotes / whitespace
+  const rawAiLabApiKey =
+    process.env.AILABAPI_API_KEY ||
+    process.env.AILAB_API_KEY ||
+    process.env.AI_LAB_API_KEY ||
+    process.env.NEXT_PUBLIC_AILABAPI_API_KEY;
+
+  const aiLabApiKey = rawAiLabApiKey
+    ? rawAiLabApiKey.trim().replace(/^["']|["']$/g, "").trim()
+    : "";
+
+  const rawEndpoint =
     process.env.AILAB_HAIRSTYLE_ENDPOINT ||
-    "https://www.ailabapi.com/api/portrait/effects/hairstyle-editor-pro";
-  const openAiApiKey = process.env.OPENAI_API_KEY;
+    process.env.AILAB_ENDPOINT ||
+    process.env.AI_LAB_HAIRSTYLE_ENDPOINT;
+
+  const aiLabEndpoint = (
+    rawEndpoint?.trim().replace(/^["']|["']$/g, "").trim() ||
+    "https://www.ailabapi.com/api/portrait/effects/hairstyle-editor-pro"
+  ).trim();
+
+  const rawOpenAiApiKey = process.env.OPENAI_API_KEY;
+  const openAiApiKey = rawOpenAiApiKey
+    ? rawOpenAiApiKey.trim().replace(/^["']|["']$/g, "").trim()
+    : "";
 
   // Verify at least one provider is configured
   if (!aiLabApiKey && !openAiApiKey) {
     return NextResponse.json(
       {
         error:
-          "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in .env.local.",
+          "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in your environment variables.",
       },
       { status: 503 },
     );
@@ -328,7 +417,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       error:
-        "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in .env.local.",
+        "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in your environment variables.",
     },
     { status: 503 },
   );
