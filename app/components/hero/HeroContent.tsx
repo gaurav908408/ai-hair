@@ -27,8 +27,10 @@ export default function HeroContent({ data }: HeroContentProps) {
         {data.badge}
       </span>
 
-      <h1 className="text-4xl font-bold leading-tight tracking-tight text-black sm:text-5xl lg:text-6xl">
-        {data.title}{" "}
+      <h1 className="text-3xl font-bold leading-tight tracking-tight text-black sm:text-4xl lg:text-[40px] xl:text-[48px]">
+        <span className="inline-block sm:whitespace-nowrap">
+          {data.title}
+        </span>{" "}
         <span className="block text-teal-500">
           {data.highlight}
         </span>

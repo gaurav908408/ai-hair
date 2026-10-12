@@ -9,6 +9,7 @@ export default function HeroVisual() {
             alt="AI hair transformation preview"
             width={500}
             height={350}
+            priority
             className="size-full"
           />
       </div>
