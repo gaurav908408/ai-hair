@@ -3,7 +3,7 @@ import React from "react";
 
 const TRANSFORMATIONS = [
   {
-    title: "Transformation 1",
+    title: "Hair Transplant",
     images: [
       {
         label: "Before",
@@ -18,7 +18,7 @@ const TRANSFORMATIONS = [
     ],
   },
   {
-    title: "Transformation 2",
+    title: "Hair Replacement (Non-Surgical)",
     images: [
       {
         label: "Before",
