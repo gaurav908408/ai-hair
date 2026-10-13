@@ -228,7 +228,7 @@ export default function HairPhotoUpload({
               >
                 {selection.source === "camera"
                   ? "Recapture image"
-                  : "Change photo"}
+                  : "Re-upload image"}
               </button>
             </div>
           ) : (
@@ -303,14 +303,14 @@ export default function HairPhotoUpload({
             onClick={openGallery}
             className="flex min-h-[48px] sm:min-h-[54px] md:min-h-[56px] w-full items-center justify-center rounded-full bg-[#00bba7] px-4 sm:px-6 py-3 sm:py-3.5 text-sm sm:text-base md:text-lg font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] shadow-xs cursor-pointer"
           >
-            Upload image
+            {selection?.source === "gallery" ? "Re-upload image" : "Upload image"}
           </button>
           <button
             type="button"
             onClick={openCamera}
             className="flex min-h-[48px] sm:min-h-[54px] md:min-h-[56px] w-full items-center justify-center rounded-full bg-[#00bba7] px-4 sm:px-6 py-3 sm:py-3.5 text-sm sm:text-base md:text-lg font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] shadow-xs cursor-pointer"
           >
-            Capture photo
+            {selection?.source === "camera" ? "Recapture photo" : "Capture photo"}
           </button>
         </div>
 
