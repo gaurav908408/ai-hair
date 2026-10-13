@@ -161,9 +161,17 @@ export default function HairPhotoUpload({
       aria-labelledby="hair-photo-upload-title"
     >
       <div className="mx-auto w-full max-w-none">
-        <h2 id="hair-photo-upload-title" className="sr-only">
-          {title}
-        </h2>
+        <div className="mx-auto mb-5 sm:mb-6 w-full max-w-[560px] text-left">
+          <p className="text-xs sm:text-sm font-bold tracking-wider text-[#111827] uppercase">
+            AI HAIR GENERATOR
+          </p>
+          <h2
+            id="hair-photo-upload-title"
+            className="mt-1.5 sm:mt-2 text-2xl sm:text-3xl lg:text-[34px] font-extrabold tracking-tight text-[#111827] leading-tight"
+          >
+            {title}
+          </h2>
+        </div>
 
         <input
           ref={galleryInputRef}
@@ -190,7 +198,7 @@ export default function HairPhotoUpload({
             }
           }}
           onDrop={handleDrop}
-          className={`mx-auto flex w-full max-w-[560px] flex-col items-center justify-center rounded-[28px] sm:rounded-[32px] border-2 border-solid px-6 py-10 sm:py-12 text-center transition-colors ${
+          className={`mx-auto flex w-full max-w-[560px] flex-col items-center justify-center rounded-2xl sm:rounded-[32px] border-2 border-solid px-4 py-8 sm:px-6 sm:py-10 md:py-12 text-center transition-colors ${
             isDragging
               ? "border-[#00a392] bg-[#f0fbfa]"
               : "border-[#00bba7] bg-white"
@@ -198,7 +206,7 @@ export default function HairPhotoUpload({
         >
           {selection ? (
             <div className="flex w-full flex-col items-center">
-              <div className="relative mb-5 flex h-48 w-full max-w-sm items-center justify-center overflow-hidden rounded-2xl bg-[#f5f9f8] sm:h-56">
+              <div className="relative mb-4 sm:mb-5 flex h-40 w-full max-w-sm items-center justify-center overflow-hidden rounded-xl sm:rounded-2xl bg-[#f5f9f8] sm:h-56">
                 <Image
                   src={selection.previewUrl}
                   alt="Selected photo preview"
@@ -208,7 +216,7 @@ export default function HairPhotoUpload({
                   className="h-full w-full object-contain"
                 />
               </div>
-              <p className="mb-4 max-w-full truncate text-sm font-semibold text-[#111827]">
+              <p className="mb-4 max-w-full truncate px-2 text-xs sm:text-sm font-semibold text-[#111827]">
                 {selection.file.name}
               </p>
               <button
@@ -216,7 +224,7 @@ export default function HairPhotoUpload({
                 onClick={
                   selection.source === "camera" ? openCamera : openGallery
                 }
-                className="rounded-full border-2 border-[#00bba7] bg-white px-7 py-2.5 text-sm sm:text-base font-bold text-[#00bba7] transition-colors hover:bg-[#e6f7f5] cursor-pointer"
+                className="rounded-full border-2 border-[#00bba7] bg-white px-5 sm:px-7 py-2 sm:py-2.5 text-xs sm:text-sm md:text-base font-bold text-[#00bba7] transition-colors hover:bg-[#e6f7f5] cursor-pointer"
               >
                 {selection.source === "camera"
                   ? "Recapture image"
@@ -226,9 +234,9 @@ export default function HairPhotoUpload({
           ) : (
             <>
               {/* Top Circular Icon */}
-              <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-[#e0f7f5] text-[#00bba7]">
+              <div className="mb-4 sm:mb-6 flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-full bg-[#e0f7f5] text-[#00bba7]">
                 <svg
-                  className="h-10 w-10 text-[#00bba7]"
+                  className="h-8 w-8 sm:h-10 sm:w-10 text-[#00bba7]"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -245,7 +253,7 @@ export default function HairPhotoUpload({
               </div>
 
               {/* Heading */}
-              <h3 className="text-2xl font-extrabold text-[#111827] sm:text-[28px] tracking-tight">
+              <h3 className="text-xl sm:text-2xl md:text-[28px] font-extrabold text-[#111827] tracking-tight">
                 Drop your photo here
               </h3>
 
@@ -253,25 +261,25 @@ export default function HairPhotoUpload({
               <button
                 type="button"
                 onClick={openGallery}
-                className="mt-2 text-base text-[#1f2937] hover:text-[#00bba7] cursor-pointer sm:text-lg"
+                className="mt-1.5 sm:mt-2 text-sm sm:text-base md:text-lg text-[#1f2937] hover:text-[#00bba7] cursor-pointer"
               >
                 or click to browse your gallery
               </button>
 
               {/* Divider */}
-              <p className="my-5 text-base sm:text-lg font-bold text-[#111827]">-or-</p>
+              <p className="my-3 sm:my-5 text-sm sm:text-base md:text-lg font-bold text-[#111827]">-or-</p>
 
               {/* Choose from gallery button */}
               <button
                 type="button"
                 onClick={openGallery}
-                className="rounded-full bg-[#00bba7] px-8 py-3.5 text-base font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] sm:text-lg shadow-xs cursor-pointer"
+                className="w-full sm:w-auto rounded-full bg-[#00bba7] px-6 sm:px-8 py-3 sm:py-3.5 text-sm sm:text-base md:text-lg font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] shadow-xs cursor-pointer"
               >
                 Choose from gallery
               </button>
 
               {/* Disclaimer Text */}
-              <p className="mt-6 max-w-md text-xs leading-relaxed text-[#4b5563] sm:text-sm">
+              <p className="mt-4 sm:mt-6 max-w-md text-xs leading-relaxed text-[#4b5563] sm:text-sm px-1">
                 JPG or PNG front-facing photo. Good lighting. Your photo stays
                 <br className="hidden sm:inline" />{" "}
                 on your device — never uploaded until you confirm.
@@ -289,18 +297,18 @@ export default function HairPhotoUpload({
         </p>
 
         {/* Bottom Two Buttons */}
-        <div className="mx-auto mt-6 grid w-full max-w-[560px] grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5">
+        <div className="mx-auto mt-4 sm:mt-6 grid w-full max-w-[560px] grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 md:gap-5">
           <button
             type="button"
             onClick={openGallery}
-            className="flex min-h-[56px] w-full items-center justify-center rounded-full bg-[#00bba7] px-6 py-3.5 text-base font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] sm:text-lg shadow-xs cursor-pointer"
+            className="flex min-h-[48px] sm:min-h-[54px] md:min-h-[56px] w-full items-center justify-center rounded-full bg-[#00bba7] px-4 sm:px-6 py-3 sm:py-3.5 text-sm sm:text-base md:text-lg font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] shadow-xs cursor-pointer"
           >
             Upload image
           </button>
           <button
             type="button"
             onClick={openCamera}
-            className="flex min-h-[56px] w-full items-center justify-center rounded-full bg-[#00bba7] px-6 py-3.5 text-base font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] sm:text-lg shadow-xs cursor-pointer"
+            className="flex min-h-[48px] sm:min-h-[54px] md:min-h-[56px] w-full items-center justify-center rounded-full bg-[#00bba7] px-4 sm:px-6 py-3 sm:py-3.5 text-sm sm:text-base md:text-lg font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] shadow-xs cursor-pointer"
           >
             Capture photo
           </button>
@@ -308,15 +316,15 @@ export default function HairPhotoUpload({
 
         {cameraOpen && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-4 backdrop-blur-xs"
             role="dialog"
             aria-modal="true"
             aria-labelledby="camera-dialog-title"
           >
-            <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl sm:p-6">
+            <div className="w-full max-w-lg rounded-2xl bg-white p-4 sm:p-6 shadow-xl max-h-[90vh] overflow-y-auto">
               <h2
                 id="camera-dialog-title"
-                className="mb-4 text-xl font-bold text-black"
+                className="mb-3 sm:mb-4 text-lg sm:text-xl font-bold text-black"
               >
                 Capture your photo
               </h2>
@@ -326,11 +334,11 @@ export default function HairPhotoUpload({
                   autoPlay
                   playsInline
                   muted
-                  className="max-h-[60vh] w-full rounded-xl bg-black object-contain"
+                  className="max-h-[50vh] sm:max-h-[60vh] w-full rounded-xl bg-black object-contain"
                 />
               ) : (
                 !cameraError && (
-                  <p className="py-12 text-center text-sm text-[#667270]">
+                  <p className="py-8 sm:py-12 text-center text-sm text-[#667270]">
                     Waiting for camera access…
                   </p>
                 )
@@ -340,11 +348,11 @@ export default function HairPhotoUpload({
                   {cameraError}
                 </p>
               )}
-              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <div className="mt-4 sm:mt-5 flex flex-col-reverse gap-2.5 sm:flex-row sm:justify-end">
                 <button
                   type="button"
                   onClick={closeCamera}
-                  className="rounded-full border border-[#319f99] px-6 py-3 font-semibold text-[#258d87] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#258d87]"
+                  className="w-full sm:w-auto rounded-full border border-[#319f99] px-5 sm:px-6 py-2.5 sm:py-3 font-semibold text-[#258d87] text-sm sm:text-base focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#258d87]"
                 >
                   Cancel
                 </button>
@@ -352,7 +360,7 @@ export default function HairPhotoUpload({
                   type="button"
                   onClick={capturePhoto}
                   disabled={!cameraStream}
-                  className="rounded-full bg-[#319f99] px-6 py-3 font-bold text-white hover:bg-[#258d87] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#258d87]"
+                  className="w-full sm:w-auto rounded-full bg-[#319f99] px-5 sm:px-6 py-2.5 sm:py-3 font-bold text-white text-sm sm:text-base hover:bg-[#258d87] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#258d87] disabled:opacity-50"
                 >
                   Take photo
                 </button>

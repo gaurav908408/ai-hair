@@ -7,14 +7,14 @@ type GenerationLoadingModalProps = {
 };
 
 export default function GenerationLoadingModal({ isOpen }: GenerationLoadingModalProps) {
+  if (!isOpen) return null;
+  return <LoadingModalDialog />;
+}
+
+function LoadingModalDialog() {
   const [progress, setProgress] = useState(8);
 
   useEffect(() => {
-    if (!isOpen) {
-      setProgress(8);
-      return;
-    }
-
     // Smooth simulated progress from 8% towards ~95% over ~32 seconds
     const interval = setInterval(() => {
       setProgress((prev) => {
@@ -36,23 +36,21 @@ export default function GenerationLoadingModal({ isOpen }: GenerationLoadingModa
     }, 450);
 
     return () => clearInterval(interval);
-  }, [isOpen]);
-
-  if (!isOpen) return null;
+  }, []);
 
   const displayPercent = Math.min(99, Math.round(progress));
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 sm:p-6 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 md:p-6 backdrop-blur-xs"
       role="dialog"
       aria-modal="true"
       aria-labelledby="loading-modal-title"
     >
-      <div className="relative w-full max-w-[620px] overflow-hidden rounded-3xl bg-white shadow-2xl p-8 sm:p-12 text-center transition-all animate-in fade-in zoom-in-95 duration-200">
+      <div className="relative w-full max-w-[620px] overflow-hidden rounded-2xl sm:rounded-3xl bg-white shadow-2xl p-5 sm:p-8 md:p-12 text-center transition-all animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
         {/* Animated Circular Spinner */}
         <div className="mx-auto flex items-center justify-center">
-          <div className="relative h-24 w-24 sm:h-28 sm:w-28">
+          <div className="relative h-16 w-16 sm:h-22 sm:w-22 md:h-28 md:w-28">
             <svg
               className="h-full w-full animate-spin"
               viewBox="0 0 100 100"
@@ -86,19 +84,19 @@ export default function GenerationLoadingModal({ isOpen }: GenerationLoadingModa
         {/* Heading */}
         <h2
           id="loading-modal-title"
-          className="mt-6 text-3xl sm:text-[42px] font-extrabold tracking-tight text-[#111827] leading-tight"
+          className="mt-4 sm:mt-6 text-xl sm:text-2xl md:text-3xl lg:text-[40px] font-extrabold tracking-tight text-[#111827] leading-tight"
         >
           Creating your new look
         </h2>
 
         {/* Subtitle */}
-        <p className="mt-3 text-base sm:text-[18px] font-semibold text-[#00bba7]">
+        <p className="mt-2 sm:mt-3 text-sm sm:text-base md:text-lg font-semibold text-[#00bba7]">
           Applying your chosen style...
         </p>
 
         {/* Progress Bar Container */}
-        <div className="mt-8 mx-auto w-full max-w-[500px]">
-          <div className="h-5 sm:h-6 w-full rounded-full border border-[#00bba7] p-[2.5px] bg-white overflow-hidden">
+        <div className="mt-6 sm:mt-8 mx-auto w-full max-w-[500px]">
+          <div className="h-4 sm:h-5 md:h-6 w-full rounded-full border border-[#00bba7] p-[2px] bg-white overflow-hidden">
             <div
               className="h-full rounded-full bg-[#00bba7] transition-all duration-300 ease-out"
               style={{ width: `${displayPercent}%` }}
@@ -106,7 +104,7 @@ export default function GenerationLoadingModal({ isOpen }: GenerationLoadingModa
           </div>
 
           {/* Percentage */}
-          <div className="mt-3 text-lg sm:text-xl font-extrabold text-[#111827]">
+          <div className="mt-2 sm:mt-3 text-base sm:text-lg md:text-xl font-extrabold text-[#111827]">
             {displayPercent}%
           </div>
         </div>

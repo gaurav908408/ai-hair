@@ -143,13 +143,12 @@ export default function HairGeneratorSection() {
 
   return (
     <>
-      <div className="grid min-h-[760px] w-full grid-cols-1 items-stretch lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="grid min-h-0 w-full grid-cols-1 items-stretch lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <HairPhotoUpload
-          className="justify-center px-5 py-8 sm:px-8 lg:px-[7.5%] lg:py-6"
+          className="justify-center px-4 py-6 sm:px-6 sm:py-8 md:px-8 lg:px-[6%] xl:px-[7.5%] lg:py-8"
           onImageSelect={handlePhotoSelect}
         />
         <HairstyleSelector
-          className="min-h-[680px] lg:min-h-[760px]"
           hasPhoto={photo !== null}
           selectedHairstyleId={selectedHairstyleId}
           onHairstyleSelect={handleHairstyleSelect}
@@ -167,7 +166,7 @@ export default function HairGeneratorSection() {
       />
       <GenerationLoadingModal isOpen={isGenerating} />
       {generatedHairstyle && generatedImage && photoPreviewUrl && (
-        <div ref={resultRef} className="w-full">
+        <div ref={resultRef} className="w-full scroll-mt-8">
           <HairTransformationResult
             originalPhotoUrl={photoPreviewUrl}
             generatedImageUrl={generatedImage}

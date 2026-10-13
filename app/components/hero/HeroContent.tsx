@@ -22,25 +22,24 @@ export interface HeroContentProps {
 
 export default function HeroContent({ data }: HeroContentProps) {
   return (
-    <div className="flex flex-col justify-center">
-      <span className="mb-8 w-fit rounded-full border border-teal-500 px-3 py-2 text-sm text-teal-600 sm:text-base">
+    <div className="flex flex-col items-center justify-center text-center lg:items-start lg:text-left">
+      <span className="mb-4 sm:mb-6 lg:mb-8 inline-flex items-center rounded-full border border-[#00bba7] bg-[#e0f7f5]/40 px-3.5 py-1.5 text-xs sm:text-sm font-semibold text-[#00a896] leading-normal shadow-2xs">
         {data.badge}
       </span>
 
-      <h1 className="text-3xl font-bold leading-tight tracking-tight text-black sm:text-4xl lg:text-[40px] xl:text-[48px]">
-        <span className="inline-block sm:whitespace-nowrap">
-          {data.title}
-        </span>{" "}
-        <span className="block text-teal-500">
-          {data.highlight}
-        </span>
+      <h1 className="text-3xl sm:text-4xl lg:text-[44px] xl:text-[50px] font-extrabold leading-[1.2] tracking-tight text-[#111827]">
+        <span className="block">See yourself</span>
+        <span className="block">with full hair in</span>
+        <span className="block text-[#00bba7]">30 seconds</span>
       </h1>
 
-      <p className="mt-6 max-w-2xl text-base leading-relaxed text-gray-900 sm:text-xl">
+      <p className="mt-4 sm:mt-5 max-w-md lg:max-w-xl text-[15px] sm:text-base md:text-lg leading-relaxed text-[#111827] mx-auto lg:mx-0 font-normal">
         {data.description}
       </p>
 
-      <div className="mt-8 max-w-xl">
+      <div className="my-6 sm:my-8 w-full border-t border-[#76d7d0]/80" />
+
+      <div className="w-full max-w-xl mx-auto lg:mx-0">
         <HeroStats stats={data.stats} />
       </div>
     </div>

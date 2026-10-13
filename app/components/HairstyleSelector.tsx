@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { Check, Image as ImageIcon, Zap } from "lucide-react";
-import { useState } from "react";
+import { Check, ChevronDown, ChevronUp, Image as ImageIcon, Zap } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import type { HairstyleOption } from "../data/hairstyles";
 import { HAIRSTYLES } from "../data/hairstyles";
 
@@ -30,6 +30,19 @@ export default function HairstyleSelector({
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(
     null,
   );
+  const [containerHeight, setContainerHeight] = useState<number | null>(null);
+  const [scrollRatio, setScrollRatio] = useState({
+    topPercent: 0,
+    heightPercent: 75,
+  });
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartYRef = useRef(0);
+  const dragStartScrollTopRef = useRef(0);
+
   const selectedId = selectedHairstyleId ?? internalSelectedId;
   const selectedHairstyle =
     hairstyles.find((hairstyle) => hairstyle.id === selectedId) ?? null;
@@ -41,72 +54,260 @@ export default function HairstyleSelector({
     onHairstyleSelect?.(hairstyle);
   };
 
+  const updateVisibleHeight = () => {
+    if (!gridRef.current) return;
+    const cardElements = gridRef.current.children;
+    // Exactly 6 cards (index 0 to 5, which forms 3 rows in a 2-column grid)
+    if (cardElements.length >= 6) {
+      const firstCard = cardElements[0] as HTMLElement;
+      const sixthCard = cardElements[5] as HTMLElement;
+      if (firstCard && sixthCard) {
+        const topOffset = firstCard.offsetTop;
+        const bottom = sixthCard.offsetTop + sixthCard.offsetHeight;
+        const exactHeight = bottom - topOffset + 4;
+        if (exactHeight > 200) {
+          setContainerHeight(exactHeight);
+        }
+      }
+    }
+  };
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const maxScroll = scrollHeight - clientHeight;
+    const visibleRatio = scrollHeight > 0 ? clientHeight / scrollHeight : 1;
+    const heightPercent = Math.max(20, Math.min(85, visibleRatio * 100));
+    const progress = maxScroll > 0 ? scrollTop / maxScroll : 0;
+    const topPercent = progress * (100 - heightPercent);
+    setScrollRatio({ topPercent, heightPercent });
+  };
+
+  useEffect(() => {
+    updateVisibleHeight();
+    handleScroll();
+    const timer1 = setTimeout(updateVisibleHeight, 100);
+    const timer2 = setTimeout(updateVisibleHeight, 350);
+
+    const observer = new ResizeObserver(() => {
+      updateVisibleHeight();
+      handleScroll();
+    });
+
+    if (gridRef.current) {
+      observer.observe(gridRef.current);
+    }
+
+    window.addEventListener("resize", updateVisibleHeight);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      observer.disconnect();
+      window.removeEventListener("resize", updateVisibleHeight);
+    };
+  }, [hairstyles]);
+
+  const handleTrackPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!trackRef.current || !scrollContainerRef.current) return;
+    const trackRect = trackRef.current.getBoundingClientRect();
+    const clickY = e.clientY - trackRect.top;
+    const clickRatio = Math.max(0, Math.min(1, clickY / trackRect.height));
+    const el = scrollContainerRef.current;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    el.scrollTo({
+      top: clickRatio * maxScroll,
+      behavior: "smooth",
+    });
+  };
+
+  const handleThumbPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    isDraggingRef.current = true;
+    dragStartYRef.current = e.clientY;
+    if (scrollContainerRef.current) {
+      dragStartScrollTopRef.current = scrollContainerRef.current.scrollTop;
+    }
+  };
+
+  const handleThumbPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingRef.current || !trackRef.current || !scrollContainerRef.current) return;
+    const trackHeight = trackRef.current.clientHeight;
+    if (trackHeight <= 0) return;
+    const el = scrollContainerRef.current;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    const deltaY = e.clientY - dragStartYRef.current;
+    const deltaScroll = (deltaY / trackHeight) * el.scrollHeight;
+    el.scrollTop = Math.max(0, Math.min(maxScroll, dragStartScrollTopRef.current + deltaScroll));
+  };
+
+  const handleThumbPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    isDraggingRef.current = false;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
+
+  const scrollByAmount = (delta: number) => {
+    if (!scrollContainerRef.current) return;
+    scrollContainerRef.current.scrollBy({
+      top: delta,
+      behavior: "smooth",
+    });
+  };
+
   return (
     <aside
-      className={`flex h-[680px] min-h-0 w-full flex-col overflow-hidden bg-[#f1faf9] p-4 sm:p-5 lg:h-[760px] lg:p-4 ${className}`.trim()}
+      className={`flex min-h-0 w-full flex-col overflow-hidden bg-[#f1faf9] p-4 sm:p-5 md:p-6 lg:p-6 rounded-2xl sm:rounded-3xl border border-[#d6eeeb] ${className}`.trim()}
       aria-labelledby="hairstyle-selector-heading"
     >
-      <h2 id="hairstyle-selector-heading" className="sr-only">
-        Select your hairstyle
-      </h2>
+      {/* Title & description */}
+      <div className="mb-3 sm:mb-4 px-1 shrink-0 text-left">
+        <h2
+          id="hairstyle-selector-heading"
+          className="text-lg sm:text-xl font-bold tracking-tight text-[#111827]"
+        >
+          Select your hairstyle
+        </h2>
+        <p className="mt-1 text-xs sm:text-sm text-[#4b5563]">
+          Pick the look you want to try on. You can switch anytime.
+        </p>
+      </div>
 
-      <div
-        className="min-h-0 flex-1 overscroll-contain overflow-y-auto scroll-smooth px-1 [scrollbar-color:#8bcac5_transparent] [scrollbar-width:thin]"
-        aria-label="Hairstyle options"
-        tabIndex={0}
-      >
-        <div className="mx-auto grid max-w-[500px] grid-cols-2 gap-3 sm:gap-4">
-          {hairstyles.map((hairstyle) => {
-            const isSelected = hairstyle.id === selectedId;
+      {/* Grid container with side slider */}
+      <div className="relative flex flex-1 min-h-0 w-full items-stretch gap-2 sm:gap-2.5">
+        {/* Scrollable hairstyle cards area (showing exactly 6 cards at a time) */}
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          style={{
+            height: containerHeight ? `${containerHeight}px` : undefined,
+          }}
+          className="min-h-0 flex-1 overflow-y-auto scroll-smooth px-1 pt-1 sm:pt-2 pb-2 overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden max-h-[480px] sm:max-h-[520px] md:max-h-[560px]"
+          aria-label="Hairstyle options"
+          tabIndex={0}
+        >
+          <div
+            ref={gridRef}
+            className="mx-auto grid w-full max-w-[500px] grid-cols-2 gap-2.5 sm:gap-3 md:gap-3.5"
+          >
+            {hairstyles.map((hairstyle) => {
+              const isSelected = hairstyle.id === selectedId;
 
-            return (
-              <button
-                key={hairstyle.id}
-                type="button"
-                onClick={() => selectHairstyle(hairstyle)}
-                disabled={!hasPhoto || isGenerating}
-                aria-pressed={isSelected}
-                className={`group relative min-w-0 overflow-hidden rounded-2xl border bg-white text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#258d87] disabled:cursor-not-allowed disabled:opacity-50 ${
-                  hasPhoto ? "hover:border-[#319f99]" : ""
-                } ${
-                  isSelected
-                    ? "border-2 border-[#258d87] shadow-sm"
-                    : "border-[#d5e8e5]"
-                }`}
-              >
-                <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden bg-[#f7fbfa]">
-                  {hairstyle.image ? (
-                    <Image
-                      src={hairstyle.image}
-                      alt={`${hairstyle.name} hairstyle`}
-                      fill
-                      sizes="(max-width: 640px) 42vw, (max-width: 1024px) 22vw, 16vw"
-                      className="object-contain p-2"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-2 text-center text-[#829794]">
-                      <ImageIcon aria-hidden="true" size={25} strokeWidth={1.6} />
-                      <span className="text-[10px] leading-4 sm:text-xs">
-                        Hairstyle image unavailable
+              return (
+                <button
+                  key={hairstyle.id}
+                  type="button"
+                  onClick={() => selectHairstyle(hairstyle)}
+                  disabled={!hasPhoto || isGenerating}
+                  aria-pressed={isSelected}
+                  className={`group relative flex flex-col min-w-0 overflow-hidden rounded-xl sm:rounded-2xl border bg-white text-left transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00bba7] disabled:cursor-not-allowed disabled:opacity-60 ${
+                    hasPhoto ? "hover:border-[#00bba7] hover:shadow-xs" : ""
+                  } ${
+                    isSelected
+                      ? "border-2 border-[#00bba7] shadow-sm ring-1 ring-[#00bba7]/20"
+                      : "border-[#d5e8e5]"
+                  }`}
+                >
+                  <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-[#f7fbfa]">
+                    {hairstyle.image ? (
+                      <Image
+                        src={hairstyle.image}
+                        alt={`${hairstyle.name} hairstyle`}
+                        fill
+                        sizes="(max-width: 480px) 42vw, (max-width: 768px) 38vw, (max-width: 1024px) 20vw, 15vw"
+                        className="object-contain p-1.5 sm:p-2 transition-transform duration-200 group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 px-2 text-center text-[#829794]">
+                        <ImageIcon aria-hidden="true" size={24} strokeWidth={1.6} />
+                        <span className="text-[10px] leading-4 sm:text-xs">
+                          Hairstyle image unavailable
+                        </span>
+                      </div>
+                    )}
+                    {isSelected && (
+                      <span className="absolute right-1.5 top-1.5 sm:right-2 sm:top-2 flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-[#00bba7] text-white shadow-xs">
+                        <Check aria-hidden="true" size={13} strokeWidth={3} />
                       </span>
-                    </div>
-                  )}
-                  {isSelected && (
-                    <span className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#258d87] text-white">
-                      <Check aria-hidden="true" size={15} strokeWidth={3} />
-                    </span>
-                  )}
-                </div>
-                <span className="block min-h-10 px-2 py-2 text-center text-xs font-semibold leading-4 text-[#203330] sm:text-sm">
-                  {hairstyle.name}
-                </span>
-              </button>
-            );
-          })}
+                    )}
+                  </div>
+                  <span className="block min-h-8 sm:min-h-9 px-1.5 py-1.5 sm:px-2 sm:py-2 text-center text-[11px] sm:text-xs md:text-sm font-semibold leading-tight text-[#203330] break-words">
+                    {hairstyle.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Side slider control to slide up/down and reveal more images */}
+        <div
+          className="flex w-5 sm:w-6 flex-col items-center justify-between shrink-0 py-1"
+          style={{
+            height: containerHeight ? `${containerHeight}px` : "100%",
+          }}
+          aria-label="Hairstyle list slider"
+        >
+          {/* Slide up button */}
+          <button
+            type="button"
+            onClick={() => scrollByAmount(-150)}
+            tabIndex={-1}
+            title="Slide up to view styles"
+            aria-label="Slide up"
+            className="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-white text-[#00bba7] border border-[#d5ede9] hover:bg-[#e0f7f5] active:scale-95 transition cursor-pointer shadow-2xs mb-1"
+          >
+            <ChevronUp size={14} strokeWidth={2.5} />
+          </button>
+
+          {/* Slider track */}
+          <div
+            ref={trackRef}
+            onPointerDown={handleTrackPointerDown}
+            className="relative w-2.5 sm:w-3 flex-1 rounded-full bg-[#d5ede9] hover:bg-[#cbe6e2] transition-colors cursor-pointer select-none"
+            role="scrollbar"
+            aria-controls="hairstyle-options"
+            aria-valuenow={Math.round(scrollRatio.topPercent)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            {/* Draggable slider thumb */}
+            <div
+              onPointerDown={handleThumbPointerDown}
+              onPointerMove={handleThumbPointerMove}
+              onPointerUp={handleThumbPointerUp}
+              style={{
+                height: `${scrollRatio.heightPercent}%`,
+                top: `${scrollRatio.topPercent}%`,
+              }}
+              className="absolute left-0 right-0 rounded-full bg-[#00bba7] hover:bg-[#009686] active:bg-[#008072] cursor-grab active:cursor-grabbing shadow-xs transition-[top] duration-75"
+            />
+          </div>
+
+          {/* Slide down button */}
+          <button
+            type="button"
+            onClick={() => scrollByAmount(150)}
+            tabIndex={-1}
+            title="Slide down to view more styles"
+            aria-label="Slide down"
+            className="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-white text-[#00bba7] border border-[#d5ede9] hover:bg-[#e0f7f5] active:scale-95 transition cursor-pointer shadow-2xs mt-1"
+          >
+            <ChevronDown size={14} strokeWidth={2.5} />
+          </button>
         </div>
       </div>
 
-      <footer className="-mx-4 shrink-0 border-t border-[#d6eeeb] bg-[#eaf8f6] px-4 pb-1 pt-4 sm:-mx-5 sm:px-5 lg:-mx-4 lg:px-4">
+      {/* Footer generate button */}
+      <footer className="-mx-4 sm:-mx-5 md:-mx-6 lg:-mx-6 shrink-0 border-t border-[#d6eeeb] bg-[#eaf8f6] px-4 sm:px-5 md:px-6 lg:px-6 pb-2.5 pt-3 sm:pb-3 sm:pt-4 mt-3 sm:mt-4">
         <button
           type="button"
           disabled={!canGenerate || isGenerating}
@@ -115,7 +316,7 @@ export default function HairstyleSelector({
               onGenerate(selectedHairstyle);
             }
           }}
-          className="flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-[#258d87] px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-[#1d7772] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1d7772] disabled:cursor-not-allowed disabled:bg-[#9aa3b2] disabled:text-white/90 sm:text-base"
+          className="flex min-h-12 sm:min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-[#00bba7] px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] disabled:cursor-not-allowed disabled:bg-[#9aa3b2] disabled:text-white/90 shadow-xs cursor-pointer"
         >
           <Zap aria-hidden="true" size={18} fill="currentColor" />
           {isGenerating ? "Generating your look..." : "Generate My Look"}

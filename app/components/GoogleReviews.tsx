@@ -177,10 +177,10 @@ export function GoogleReviews({
   className = "",
 }: GoogleReviewsProps) {
   return (
-    <section className={`w-full py-12 px-4 ${className}`}>
-      <div className="mx-auto w-full">
-        <div className="text-center mb-10">
-          <h2 className="text-3xl md:text-4xl font-semibold text-foreground text-center">
+    <section className={`w-full py-8 sm:py-12 md:py-16 px-4 sm:px-6 lg:px-8 ${className}`}>
+      <div className="mx-auto w-full max-w-7xl">
+        <div className="text-center mb-6 sm:mb-10">
+          <h2 className="text-2xl sm:text-3xl md:text-4xl font-semibold text-foreground text-center">
             {title}
           </h2>
         </div>
@@ -190,24 +190,27 @@ export function GoogleReviews({
           pagination={{ clickable: true }}
           autoplay={{ delay: 3000, disableOnInteraction: false }}
           loop={reviews.length > 3}
-          spaceBetween={32}
+          spaceBetween={16}
           slidesPerView={1}
           breakpoints={{
-            640: { slidesPerView: 2.1 },
-            1024: { slidesPerView: 3.15 },
+            480: { slidesPerView: 1.25, spaceBetween: 16 },
+            640: { slidesPerView: 1.75, spaceBetween: 20 },
+            768: { slidesPerView: 2.2, spaceBetween: 24 },
+            1024: { slidesPerView: 2.8, spaceBetween: 28 },
+            1280: { slidesPerView: 3.15, spaceBetween: 32 },
           }}
-          className="google-reviews-swiper !px-1 !pb-16"
+          className="google-reviews-swiper !px-1 !pb-14 sm:!pb-16"
         >
           {reviews.map((review, index) => (
             <SwiperSlide key={`${review.name}-${index}`} className="!h-auto">
-              <div className="box-border flex h-[370px] w-full flex-col overflow-hidden rounded-[30px] border border-gray-200 bg-white p-7 md:p-10 shadow-sm transition-shadow hover:shadow-md">
-                <div className="mb-6 flex items-center justify-between">
-                  <h3 className="font-bold text-gray-800 md:text-xl">
+              <div className="box-border flex min-h-[300px] h-[330px] sm:h-[350px] md:h-[370px] w-full flex-col overflow-hidden rounded-2xl sm:rounded-[30px] border border-gray-200 bg-white p-5 sm:p-7 md:p-8 lg:p-9 shadow-sm transition-shadow hover:shadow-md">
+                <div className="mb-4 sm:mb-6 flex items-center justify-between">
+                  <h3 className="text-base sm:text-lg md:text-xl font-bold text-gray-800 line-clamp-1">
                     {review.name}
                   </h3>
                   <span
                     aria-label="Google review"
-                    className="bg-clip-text text-2xl font-bold text-transparent"
+                    className="bg-clip-text text-xl sm:text-2xl font-bold text-transparent shrink-0"
                     style={{
                       backgroundImage:
                         "conic-gradient(from -45deg, #4285F4 0deg 90deg, #34A853 90deg 180deg, #FBBC05 180deg 250deg, #EA4335 250deg 310deg, #4285F4 310deg)",
@@ -217,16 +220,16 @@ export function GoogleReviews({
                   </span>
                 </div>
 
-                <p className="line-clamp-5 text-base leading-relaxed text-slate-600 md:text-xl">
+                <p className="line-clamp-5 text-sm sm:text-base md:text-lg leading-relaxed text-slate-600">
                   {review.text}
                 </p>
 
-                <div className="mt-auto flex items-center gap-3 pt-6">
+                <div className="mt-auto flex items-center gap-2.5 sm:gap-3 pt-4 sm:pt-6">
                   <div className="flex text-teal-500" aria-label={`${review.rating} out of 5 stars`}>
                     {[...Array(5)].map((_, i) => (
                       <Star
                         key={i}
-                        className={`size-5 md:size-6 ${
+                        className={`size-4 sm:size-5 md:size-6 ${
                           i < review.rating
                             ? "fill-teal-500 text-teal-500"
                             : "fill-gray-200 text-gray-200"
@@ -234,7 +237,7 @@ export function GoogleReviews({
                       />
                     ))}
                   </div>
-                  <span className="text-base text-slate-500">
+                  <span className="text-xs sm:text-sm md:text-base text-slate-500 font-medium">
                     {review.rating.toFixed(1)}
                   </span>
                 </div>
