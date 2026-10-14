@@ -405,13 +405,17 @@ export async function POST(request: Request) {
     );
   }
 
-  // 1. Client Identification Layer (Browser Fingerprint + Device UUID + Client IP)
-  const headerVisitorId =
-    request.headers.get("x-visitor-id") ||
+  // 1. Client Identification Layer (Incognito-Proof Hardware Fingerprint)
+  // hardwareHash is derived from Canvas, WebGL, Audio, CPU, RAM, and Screen.
+  // It does NOT change when opening an Incognito or Private window!
+  const hardwareHash =
     request.headers.get("x-hardware-hash") ||
-    request.headers.get("x-device-id");
+    (typeof form.get("hardwareHash") === "string" ? (form.get("hardwareHash") as string) : null);
 
-  const formVisitorId = typeof form.get("visitorId") === "string" ? (form.get("visitorId") as string) : null;
+  const fallbackVisitorId =
+    request.headers.get("x-visitor-id") ||
+    request.headers.get("x-device-id") ||
+    (typeof form.get("visitorId") === "string" ? (form.get("visitorId") as string) : null);
 
   // Extract client IP (handles CGNAT / proxies / cloudflare)
   const forwardedFor = request.headers.get("x-forwarded-for");
@@ -421,8 +425,8 @@ export async function POST(request: Request) {
     request.headers.get("cf-connecting-ip") ||
     "127.0.0.1";
 
-  // Primary unique client ID: Digital Fingerprint hash; fallback to IP for direct API requests
-  const visitorId = (headerVisitorId || formVisitorId || clientIp).trim();
+  // Primary unique key: hardwareHash ensures Incognito tabs cannot bypass daily limit
+  const visitorId = (hardwareHash || fallbackVisitorId || clientIp).trim();
 
   // 2. Zero-Infrastructure Rate Limiter (Embedded SQLite)
   const rateLimitResult = checkAndConsumeRateLimit(visitorId, clientIp);

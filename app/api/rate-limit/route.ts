@@ -9,10 +9,11 @@ export const runtime = "nodejs";
  * Read-only: Does NOT consume quota credits.
  */
 export async function GET(request: Request) {
-  // Extract visitor identity from headers
+  // Extract visitor identity from headers (prioritize hardware hash for incognito resistance)
+  const hardwareHash = request.headers.get("x-hardware-hash");
   const visitorId =
+    hardwareHash ||
     request.headers.get("x-visitor-id") ||
-    request.headers.get("x-hardware-hash") ||
     request.headers.get("x-device-id");
 
   // Extract client IP (handling proxies, CDN, CGNAT)

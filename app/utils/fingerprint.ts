@@ -253,9 +253,9 @@ async function getAudioFingerprint(): Promise<string> {
     compressor.connect(context.destination);
     oscillator.start(0);
 
-    // Render with 80ms timeout protection so slow devices never lag
+    // Render with 250ms timeout protection
     const renderPromise = context.startRendering();
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 80));
+    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 250));
 
     const renderedBuffer = await Promise.race([renderPromise, timeoutPromise]);
     if (!renderedBuffer) return "audio-timeout";
@@ -386,7 +386,7 @@ export async function getVisitorIdentification(): Promise<VisitorIdentification>
     const webgl = getWebGLFingerprint();
     const audioFingerprint = await getAudioFingerprint();
 
-    // Bundle hardware profile
+    // Bundle hardware profile (all fixed hardware & OS attributes)
     const hardwarePayload = {
       canvas: canvasFingerprint,
       webgl: webgl.fullHash,
@@ -394,18 +394,18 @@ export async function getVisitorIdentification(): Promise<VisitorIdentification>
       cores,
       memoryGB,
       touchPoints,
-      screen: `${screenWidth}x${screenHeight}x${colorDepth}@${pixelRatio}_${screenAvailWidth}x${screenAvailHeight}`,
+      screen: `${screenWidth}x${screenHeight}x${colorDepth}@${pixelRatio}`,
       tz: `${timezone}:${timezoneOffset}`,
       lang: `${language}:${languages}`,
       plat: platform,
     };
 
-    // Hardware Hash: Consistent across incognito windows on same machine
-    const hardwareHash = await hashString(JSON.stringify(hardwarePayload));
+    // Hardware Hash: 100% consistent across regular and private/incognito windows on same machine
+    const rawHash = await hashString(JSON.stringify(hardwarePayload));
+    const hardwareHash = `hw_${rawHash}`;
 
-    // Composite Visitor ID: Pairs physical hardware signature with persistent Device UUID
-    const compositePayload = `${hardwareHash}:${deviceId}`;
-    const visitorId = await hashString(compositePayload);
+    // Primary visitorId IS the hardwareHash so private tabs can NEVER bypass the quota
+    const visitorId = hardwareHash;
 
     return {
       visitorId,
