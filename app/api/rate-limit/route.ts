@@ -24,11 +24,12 @@ export async function GET(request: Request) {
     request.headers.get("cf-connecting-ip") ||
     "127.0.0.1";
 
-  const identifier = visitorId || clientIp;
-  const status = getRateLimitStatus(identifier);
+  const identifier = (visitorId || clientIp).trim();
+  const status = await getRateLimitStatus(identifier);
 
   return NextResponse.json(
     {
+      visitorId: identifier,
       limit: status.limit,
       remaining: status.remaining,
       resetTimestamp: status.resetTimestamp,

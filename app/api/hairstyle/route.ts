@@ -428,8 +428,8 @@ export async function POST(request: Request) {
   // Primary unique key: hardwareHash ensures Incognito tabs cannot bypass daily limit
   const visitorId = (hardwareHash || fallbackVisitorId || clientIp).trim();
 
-  // 2. Zero-Infrastructure Rate Limiter (Embedded SQLite)
-  const rateLimitResult = checkAndConsumeRateLimit(visitorId, clientIp);
+  // 2. Zero-Infrastructure Rate Limiter (Embedded SQLite + Cloud Sync)
+  const rateLimitResult = await checkAndConsumeRateLimit(visitorId, clientIp);
 
   if (!rateLimitResult.allowed) {
     const waitTime =
@@ -481,7 +481,7 @@ export async function POST(request: Request) {
   // If generation failed due to invalid photo / no face detected (422), refund credit
   if (!generationResponse.ok) {
     if (generationResponse.status === 422) {
-      refundRateLimit(visitorId);
+      await refundRateLimit(visitorId);
     }
     return generationResponse;
   }
