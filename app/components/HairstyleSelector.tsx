@@ -15,6 +15,7 @@ type HairstyleSelectorProps = {
   isGenerating?: boolean;
   generationError?: string;
   className?: string;
+  rateLimitInfo?: { remaining: number; limit: number; resetTimestamp?: number } | null;
 };
 
 export default function HairstyleSelector({
@@ -26,6 +27,7 @@ export default function HairstyleSelector({
   isGenerating = false,
   generationError = "",
   className = "",
+  rateLimitInfo,
 }: HairstyleSelectorProps) {
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(
     null,
@@ -306,7 +308,7 @@ export default function HairstyleSelector({
         </div>
       </div>
 
-      {/* Footer generate button */}
+      {/* Footer generate button & quota status */}
       <footer className="-mx-4 sm:-mx-5 md:-mx-6 lg:-mx-6 shrink-0 border-t border-[#d6eeeb] bg-[#eaf8f6] px-4 sm:px-5 md:px-6 lg:px-6 pb-2.5 pt-3 sm:pb-3 sm:pt-4 mt-3 sm:mt-4">
         <button
           type="button"
@@ -321,15 +323,48 @@ export default function HairstyleSelector({
           <Zap aria-hidden="true" size={18} fill="currentColor" />
           {isGenerating ? "Generating your look..." : "Generate My Look"}
         </button>
+
+        {/* Free Quota Badge */}
+        {rateLimitInfo && (
+          <div className="mt-2 flex items-center justify-between px-2 text-[11px] font-medium text-[#007064]">
+            <span className="flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-[#00bba7] animate-pulse" />
+              Daily Free Limit:
+            </span>
+            <span className="font-semibold">
+              {rateLimitInfo.remaining} / {rateLimitInfo.limit} styles remaining
+            </span>
+          </div>
+        )}
+
         {generationError && (
-          <p
-            className="mt-2 text-center text-xs leading-4 text-red-700"
+          <div
+            className={`mt-2.5 rounded-xl p-2.5 text-xs text-left ${
+              generationError.toLowerCase().includes("quota") ||
+              generationError.toLowerCase().includes("limit")
+                ? "border border-amber-300 bg-amber-50 text-amber-900"
+                : "border border-red-200 bg-red-50 text-red-700"
+            }`}
             role="alert"
           >
-            {generationError}
-          </p>
+            <p className="font-medium leading-relaxed">{generationError}</p>
+            {(generationError.toLowerCase().includes("quota") ||
+              generationError.toLowerCase().includes("limit")) && (
+              <a
+                href={`https://wa.me/919999999999?text=${encodeURIComponent(
+                  "Hi! I reached my free AI hair preview quota on your website and would like to speak with a hair specialist."
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 inline-flex items-center gap-1 font-bold text-[#008c7c] hover:underline"
+              >
+                Connect with our Hair Specialist on WhatsApp &rarr;
+              </a>
+            )}
+          </div>
         )}
-        {!hasPhoto && (
+
+        {!hasPhoto && !generationError && (
           <p className="mt-2 text-center text-xs leading-4 text-[#586967]">
             Upload or capture a photo to choose a hairstyle.
           </p>

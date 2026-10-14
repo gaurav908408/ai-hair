@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { HairstyleOption } from "../data/hairstyles";
+import { getVisitorIdentification } from "../utils/fingerprint";
 import HairPhotoUpload from "./HairPhotoUpload";
 import HairstyleSelector from "./HairstyleSelector";
 import LeadCaptureModal from "./LeadCaptureModal";
@@ -20,9 +21,41 @@ export default function HairGeneratorSection() {
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [pendingHairstyle, setPendingHairstyle] = useState<HairstyleOption | null>(null);
   const [leadPhone, setLeadPhone] = useState<string>("");
+  const [rateLimitInfo, setRateLimitInfo] = useState<{
+    remaining: number;
+    limit: number;
+    resetTimestamp?: number;
+  } | null>(null);
+
   const photoPreviewUrlRef = useRef<string | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
   const generationRequestRef = useRef(0);
+
+  // Initialize fingerprint silently and fetch remaining free quota
+  useEffect(() => {
+    getVisitorIdentification()
+      .then((visitor) => {
+        fetch("/api/rate-limit", {
+          headers: {
+            "X-Visitor-Id": visitor.visitorId,
+            "X-Hardware-Hash": visitor.hardwareHash,
+            "X-Device-Id": visitor.deviceId,
+          },
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data && typeof data.remaining === "number") {
+              setRateLimitInfo({
+                remaining: data.remaining,
+                limit: data.limit,
+                resetTimestamp: data.resetTimestamp,
+              });
+            }
+          })
+          .catch(() => {});
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -96,9 +129,15 @@ export default function HairGeneratorSection() {
     setGeneratedImage(null);
 
     try {
+      const visitor = await getVisitorIdentification();
+
       const form = new FormData();
       form.set("photo", photo);
       form.set("hairstyleId", hairstyle.id);
+      form.set("visitorId", visitor.visitorId);
+      form.set("hardwareHash", visitor.hardwareHash);
+      form.set("deviceId", visitor.deviceId);
+
       if (leadDetails) {
         form.set("firstName", leadDetails.firstName);
         form.set("lastName", leadDetails.lastName);
@@ -107,14 +146,44 @@ export default function HairGeneratorSection() {
 
       const response = await fetch("/api/hairstyle", {
         method: "POST",
+        headers: {
+          "X-Visitor-Id": visitor.visitorId,
+          "X-Hardware-Hash": visitor.hardwareHash,
+          "X-Device-Id": visitor.deviceId,
+        },
         body: form,
       });
+
+      const remainingHeader = response.headers.get("X-RateLimit-Remaining");
+      const limitHeader = response.headers.get("X-RateLimit-Limit");
+      const resetHeader = response.headers.get("X-RateLimit-Reset");
+      if (remainingHeader !== null && limitHeader !== null) {
+        setRateLimitInfo({
+          remaining: parseInt(remainingHeader, 10),
+          limit: parseInt(limitHeader, 10),
+          resetTimestamp: resetHeader ? parseInt(resetHeader, 10) * 1000 : Date.now() + 3600000,
+        });
+      }
+
       const result = (await response.json()) as {
         image?: string;
         error?: string;
+        rateLimit?: {
+          limit: number;
+          remaining: number;
+          resetTimestamp: number;
+          retryAfterSeconds: number;
+        };
       };
 
       if (!response.ok) {
+        if (response.status === 429 && result.rateLimit) {
+          setRateLimitInfo({
+            remaining: 0,
+            limit: result.rateLimit.limit,
+            resetTimestamp: result.rateLimit.resetTimestamp,
+          });
+        }
         throw new Error(result.error || "Unable to generate the hairstyle.");
       }
       if (!result.image?.startsWith("data:image/")) {
@@ -155,6 +224,7 @@ export default function HairGeneratorSection() {
           onGenerate={handleOpenLeadModal}
           isGenerating={isGenerating}
           generationError={generationError}
+          rateLimitInfo={rateLimitInfo}
         />
       </div>
 

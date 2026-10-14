@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
+import { checkAndConsumeRateLimit, refundRateLimit } from "@/app/lib/rateLimiter";
 
 export const runtime = "nodejs";
 // Allow up to 60 seconds for serverless function execution on Vercel
@@ -404,21 +405,88 @@ export async function POST(request: Request) {
     );
   }
 
+  // 1. Client Identification Layer (Browser Fingerprint + Device UUID + Client IP)
+  const headerVisitorId =
+    request.headers.get("x-visitor-id") ||
+    request.headers.get("x-hardware-hash") ||
+    request.headers.get("x-device-id");
+
+  const formVisitorId = typeof form.get("visitorId") === "string" ? (form.get("visitorId") as string) : null;
+
+  // Extract client IP (handles CGNAT / proxies / cloudflare)
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const clientIp =
+    (forwardedFor ? forwardedFor.split(",")[0].trim() : null) ||
+    request.headers.get("x-real-ip") ||
+    request.headers.get("cf-connecting-ip") ||
+    "127.0.0.1";
+
+  // Primary unique client ID: Digital Fingerprint hash; fallback to IP for direct API requests
+  const visitorId = (headerVisitorId || formVisitorId || clientIp).trim();
+
+  // 2. Zero-Infrastructure Rate Limiter (Embedded SQLite)
+  const rateLimitResult = checkAndConsumeRateLimit(visitorId, clientIp);
+
+  if (!rateLimitResult.allowed) {
+    const waitTime =
+      rateLimitResult.retryAfterSeconds >= 3600
+        ? `${Math.ceil(rateLimitResult.retryAfterSeconds / 3600)} hour${Math.ceil(rateLimitResult.retryAfterSeconds / 3600) > 1 ? "s" : ""}`
+        : `${Math.max(1, Math.ceil(rateLimitResult.retryAfterSeconds / 60))} minute${Math.ceil(rateLimitResult.retryAfterSeconds / 60) > 1 ? "s" : ""}`;
+
+    return NextResponse.json(
+      {
+        error: `Daily free quota exceeded (${rateLimitResult.limit} styles per day). Please try again in ${waitTime}, or speak with our hair specialist!`,
+        rateLimit: {
+          limit: rateLimitResult.limit,
+          remaining: 0,
+          resetTimestamp: rateLimitResult.resetTimestamp,
+          retryAfterSeconds: rateLimitResult.retryAfterSeconds,
+        },
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(rateLimitResult.retryAfterSeconds),
+          "X-RateLimit-Limit": String(rateLimitResult.limit),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.floor(rateLimitResult.resetTimestamp / 1000)),
+        },
+      }
+    );
+  }
+
+  // 3. Trigger AI Hair Transformation Model
+  let generationResponse: NextResponse;
+
   // Priority 1: Use AI Lab Hairstyle Endpoint if configured
   if (aiLabApiKey) {
-    return generateWithAILab(photo, hairstyle, aiLabApiKey, aiLabEndpoint);
+    generationResponse = await generateWithAILab(photo, hairstyle, aiLabApiKey, aiLabEndpoint);
+  } else if (openAiApiKey) {
+    // Priority 2: Use OpenAI Image Generation
+    generationResponse = await generateWithOpenAI(photo, hairstyle, openAiApiKey);
+  } else {
+    return NextResponse.json(
+      {
+        error:
+          "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in your environment variables.",
+      },
+      { status: 503 },
+    );
   }
 
-  // Priority 2: Use OpenAI Image Generation
-  if (openAiApiKey) {
-    return generateWithOpenAI(photo, hairstyle, openAiApiKey);
+  // If generation failed due to invalid photo / no face detected (422), refund credit
+  if (!generationResponse.ok) {
+    if (generationResponse.status === 422) {
+      refundRateLimit(visitorId);
+    }
+    return generationResponse;
   }
 
-  return NextResponse.json(
-    {
-      error:
-        "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in your environment variables.",
-    },
-    { status: 503 },
-  );
+  // Attach standard rate limit headers to successful response
+  generationResponse.headers.set("X-RateLimit-Limit", String(rateLimitResult.limit));
+  generationResponse.headers.set("X-RateLimit-Remaining", String(rateLimitResult.remaining));
+  generationResponse.headers.set("X-RateLimit-Reset", String(Math.floor(rateLimitResult.resetTimestamp / 1000)));
+  generationResponse.headers.set("X-Visitor-Id", visitorId);
+
+  return generationResponse;
 }
