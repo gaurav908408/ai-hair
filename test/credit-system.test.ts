@@ -29,13 +29,13 @@ import {
   getTodayDateString,
   getDatabaseFilePath,
   resetDatabaseInstanceForTesting,
-} from "../app/lib/creditManager.ts";
+} from "../app/lib/creditManager";
 import {
   createSessionToken,
   resolveUserIdentity,
   normalizePhone,
   SESSION_COOKIE_NAME,
-} from "../app/lib/auth.ts";
+} from "../app/lib/auth";
 
 // Configure test environment variables
 const TEST_DB_PATH = path.resolve(process.cwd(), "hair-gen/test/test-credits.db");

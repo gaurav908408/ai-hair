@@ -21,7 +21,7 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png"]);
 
 // Official AILabTools Hairstyle Editor Pro supported hairstyle IDs
-export const SUPPORTED_AILAB_HAIRSTYLES: Record<
+const SUPPORTED_AILAB_HAIRSTYLES: Record<
   string,
   { name: string; file: string; apiId: string; legacyId?: number }
 > = {

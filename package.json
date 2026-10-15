@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:credits": "node --experimental-strip-types test/credit-system.test.ts"
+    "test:credits": "node test/run.cjs"
   },
   "dependencies": {
     "lucide-react": "^1.53.0",

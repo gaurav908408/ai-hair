@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import {
   linkSessionToCanonicalUser,
   getCanonicalUserForSession,
-} from "./creditManager.ts";
+} from "./creditManager";
 
 export const SESSION_COOKIE_NAME = "bhg_session";
 
