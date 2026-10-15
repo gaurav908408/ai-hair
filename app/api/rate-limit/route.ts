@@ -40,6 +40,9 @@ export async function GET(request: Request) {
         "X-RateLimit-Limit": String(record.dailyCreditLimit),
         "X-RateLimit-Remaining": String(record.creditsRemaining),
         "X-RateLimit-Reset": String(Math.floor(record.resetTimestamp / 1000)),
+        "X-User-Id": identity.userId,
+        "Access-Control-Expose-Headers":
+          "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-User-Id, Retry-After",
         "Cache-Control": "no-store, max-age=0",
       },
     }

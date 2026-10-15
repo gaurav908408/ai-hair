@@ -63,9 +63,19 @@ export default function HairGeneratorSection() {
     }
   }, []);
 
-  // 1. Initial credit fetch on mount
+  // 1. Initial credit fetch on mount (load remembered lead info from localStorage if available)
   useEffect(() => {
-    fetchCreditStatus(leadPhone);
+    let initialPhone = leadPhone;
+    try {
+      const savedPhone = localStorage.getItem("_bhg_lead_phone");
+      if (savedPhone && !initialPhone) {
+        initialPhone = savedPhone;
+        setLeadPhone(savedPhone);
+      }
+    } catch {
+      // ignore
+    }
+    fetchCreditStatus(initialPhone);
   }, [fetchCreditStatus, leadPhone]);
 
   // 2. Tab switching & window focus synchronization:
@@ -73,12 +83,18 @@ export default function HairGeneratorSection() {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        fetchCreditStatus(leadPhone);
+        const currentPhone =
+          leadPhone ||
+          (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
+        fetchCreditStatus(currentPhone);
       }
     };
 
     const handleFocus = () => {
-      fetchCreditStatus(leadPhone);
+      const currentPhone =
+        leadPhone ||
+        (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
+      fetchCreditStatus(currentPhone);
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -138,12 +154,41 @@ export default function HairGeneratorSection() {
     }
     setPendingHairstyle(hairstyle);
     setGenerationError("");
+
+    // If user already submitted their lead phone in this browser, generate immediately!
+    const savedPhone =
+      leadPhone ||
+      (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
+    if (savedPhone) {
+      const savedFirst =
+        typeof window !== "undefined"
+          ? localStorage.getItem("_bhg_lead_first_name") || "Guest"
+          : "Guest";
+      const savedLast =
+        typeof window !== "undefined"
+          ? localStorage.getItem("_bhg_lead_last_name") || ""
+          : "";
+      executeGeneration(hairstyle, {
+        firstName: savedFirst,
+        lastName: savedLast,
+        phone: savedPhone,
+      });
+      return;
+    }
+
     setShowLeadModal(true);
   };
 
   const handleLeadSubmit = (leadDetails: { firstName: string; lastName: string; phone: string }) => {
     setShowLeadModal(false);
     setLeadPhone(leadDetails.phone);
+    try {
+      localStorage.setItem("_bhg_lead_phone", leadDetails.phone);
+      localStorage.setItem("_bhg_lead_first_name", leadDetails.firstName);
+      localStorage.setItem("_bhg_lead_last_name", leadDetails.lastName);
+    } catch {
+      // ignore
+    }
     if (pendingHairstyle) {
       executeGeneration(pendingHairstyle, leadDetails);
     }
@@ -170,7 +215,10 @@ export default function HairGeneratorSection() {
       return;
     }
 
-    const currentPhone = leadDetails?.phone || leadPhone;
+    const currentPhone =
+      leadDetails?.phone ||
+      leadPhone ||
+      (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
     const requestId = ++generationRequestRef.current;
     setIsGenerating(true);
     setGenerationError("");
@@ -230,6 +278,18 @@ export default function HairGeneratorSection() {
           retryAfterSeconds: number;
         };
       };
+
+      // Instantly apply authoritative balance from response body
+      if (result.rateLimit) {
+        setRateLimitInfo({
+          remaining: result.rateLimit.remaining,
+          creditsUsed:
+            result.rateLimit.creditsUsed ??
+            Math.max(0, result.rateLimit.limit - result.rateLimit.remaining),
+          limit: result.rateLimit.limit,
+          resetTimestamp: result.rateLimit.resetTimestamp,
+        });
+      }
 
       if (!response.ok) {
         if (response.status === 429 && result.rateLimit) {

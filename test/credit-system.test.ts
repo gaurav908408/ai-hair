@@ -29,16 +29,16 @@ import {
   getTodayDateString,
   getDatabaseFilePath,
   resetDatabaseInstanceForTesting,
-} from "../app/lib/creditManager";
+} from "../app/lib/creditManager.ts";
 import {
   createSessionToken,
   resolveUserIdentity,
   normalizePhone,
   SESSION_COOKIE_NAME,
-} from "../app/lib/auth";
+} from "../app/lib/auth.ts";
 
 // Configure test environment variables
-const TEST_DB_PATH = path.join(__dirname, "test-credits.db");
+const TEST_DB_PATH = path.resolve(process.cwd(), "hair-gen/test/test-credits.db");
 if (fs.existsSync(TEST_DB_PATH)) {
   try {
     fs.unlinkSync(TEST_DB_PATH);
@@ -48,7 +48,7 @@ if (fs.existsSync(TEST_DB_PATH)) {
 }
 process.env.CREDIT_DB_PATH = TEST_DB_PATH;
 process.env.RATE_LIMIT_DB_PATH = TEST_DB_PATH;
-process.env.DAILY_CREDIT_LIMIT = "5";
+process.env.DAILY_CREDIT_LIMIT = "2";
 process.env.RESET_TIMEZONE = "Asia/Kolkata";
 process.env.CREDIT_SECRET_KEY = "test-secret-key-for-automated-verification";
 
@@ -75,29 +75,29 @@ async function main() {
   resetDatabaseInstanceForTesting();
   const dbPath = getDatabaseFilePath();
 
-  // Scenario 1 & 2: User has 5 credits and generates 5 hairstyles; 6th request is rejected
-  await runAsyncTest("User consumes 5 daily credits and 6th request is rejected (HTTP 429)", async () => {
+  // Scenario 1 & 2: User has 2 credits and generates 2 hairstyles; 3rd request is rejected
+  await runAsyncTest("User consumes 2 daily credits and 3rd request is rejected (HTTP 429)", async () => {
     const userId = "test_user_quota_1";
 
     // Check initial quota
     const initial = await getUserCredits(userId);
-    assert.equal(initial.dailyCreditLimit, 5, "Daily credit limit must be 5");
-    assert.equal(initial.creditsRemaining, 5, "Initial remaining credits must be 5");
+    assert.equal(initial.dailyCreditLimit, 2, "Daily credit limit must be 2");
+    assert.equal(initial.creditsRemaining, 2, "Initial remaining credits must be 2");
     assert.equal(initial.creditsUsed, 0, "Initial credits used must be 0");
 
-    // Consume 5 credits
-    for (let i = 1; i <= 5; i++) {
+    // Consume 2 credits
+    for (let i = 1; i <= 2; i++) {
       const res = await reserveDailyCredit(userId, { reason: `Generation #${i}` });
       assert.equal(res.success, true, `Generation #${i} must succeed`);
-      assert.equal(res.remaining, 5 - i, `Remaining credits after #${i} must be ${5 - i}`);
+      assert.equal(res.remaining, 2 - i, `Remaining credits after #${i} must be ${2 - i}`);
       assert.equal(res.creditsUsed, i, `Credits used after #${i} must be ${i}`);
     }
 
-    // 6th generation must be rejected
-    const sixth = await reserveDailyCredit(userId, { reason: "Generation #6" });
-    assert.equal(sixth.success, false, "6th generation request must be rejected");
-    assert.equal(sixth.remaining, 0, "Remaining credits must be 0");
-    assert.ok(sixth.retryAfterSeconds > 0, "Retry-After seconds must be positive");
+    // 3rd generation must be rejected
+    const third = await reserveDailyCredit(userId, { reason: "Generation #3" });
+    assert.equal(third.success, false, "3rd generation request must be rejected");
+    assert.equal(third.remaining, 0, "Remaining credits must be 0");
+    assert.ok(third.retryAfterSeconds > 0, "Retry-After seconds must be positive");
   });
 
   // Scenario 3: Refreshing the page does not restore credits
@@ -106,7 +106,7 @@ async function main() {
     // Simulate page refresh (GET /api/rate-limit)
     const refreshed = await getUserCredits(userId);
     assert.equal(refreshed.creditsRemaining, 0, "Credits must remain 0 after refresh");
-    assert.equal(refreshed.creditsUsed, 5, "Credits used must remain 5 after refresh");
+    assert.equal(refreshed.creditsUsed, 2, "Credits used must remain 2 after refresh");
   });
 
   // Scenario 4: Opening another tab does not restore credits
@@ -121,8 +121,8 @@ async function main() {
     const identity = resolveUserIdentity(dummyReq);
     assert.equal(identity.userId, "usr_tab_session_test");
 
-    // Exhaust quota in tab 1
-    for (let i = 0; i < 5; i++) {
+    // Exhaust quota in tab 1 (2 credits)
+    for (let i = 0; i < 2; i++) {
       await reserveDailyCredit(identity.userId);
     }
 
@@ -136,7 +136,7 @@ async function main() {
     const tab2Credits = await getUserCredits(tab2Identity.userId);
 
     assert.equal(tab2Credits.creditsRemaining, 0, "Tab 2 must see 0 credits remaining");
-    assert.equal(tab2Credits.creditsUsed, 5, "Tab 2 must see 5 credits used");
+    assert.equal(tab2Credits.creditsUsed, 2, "Tab 2 must see 2 credits used");
   });
 
   // Scenario 5: Opening Incognito mode does not bypass limit for same authenticated/phone account
@@ -152,8 +152,8 @@ async function main() {
     const normalIdentity = resolveUserIdentity(normalReq, phone);
     assert.equal(normalIdentity.userId, "user:phone:9876543210");
 
-    // Exhaust all 5 credits
-    for (let i = 0; i < 5; i++) {
+    // Exhaust all 2 credits
+    for (let i = 0; i < 2; i++) {
       await reserveDailyCredit(normalIdentity.userId);
     }
 
@@ -178,8 +178,8 @@ async function main() {
     const req1 = new Request("http://localhost:3000/api/hairstyle");
     const id1 = resolveUserIdentity(req1, phone);
 
-    // Consume all 5 credits
-    for (let i = 0; i < 5; i++) {
+    // Consume all 2 credits
+    for (let i = 0; i < 2; i++) {
       await reserveDailyCredit(id1.userId);
     }
 
@@ -196,10 +196,10 @@ async function main() {
   await runAsyncTest("Simultaneous generation requests cannot exceed credit limit (Atomic locking)", async () => {
     const user = "test_concurrent_user";
     const initial = await getUserCredits(user);
-    assert.equal(initial.creditsRemaining, 5);
+    assert.equal(initial.creditsRemaining, 2);
 
-    // Fire 15 simultaneous parallel generation requests
-    const promises = Array.from({ length: 15 }, (_, i) =>
+    // Fire 10 simultaneous parallel generation requests
+    const promises = Array.from({ length: 10 }, (_, i) =>
       reserveDailyCredit(user, { reason: `Parallel request #${i}` })
     );
 
@@ -207,37 +207,37 @@ async function main() {
     const successfulCount = results.filter((r) => r.success).length;
     const rejectedCount = results.filter((r) => !r.success).length;
 
-    assert.equal(successfulCount, 5, "Exactly 5 simultaneous requests must succeed");
-    assert.equal(rejectedCount, 10, "Remaining 10 simultaneous requests must be rejected");
+    assert.equal(successfulCount, 2, "Exactly 2 simultaneous requests must succeed");
+    assert.equal(rejectedCount, 8, "Remaining 8 simultaneous requests must be rejected");
 
     // Check database final state
     const finalRecord = await getUserCredits(user);
     assert.equal(finalRecord.creditsRemaining, 0, "Final remaining credits must be 0");
-    assert.equal(finalRecord.creditsUsed, 5, "Final credits used must be 5");
+    assert.equal(finalRecord.creditsUsed, 2, "Final credits used must be 2");
   });
 
   // Scenario 8: Failed AI generation follows defined refund policy
   await runAsyncTest("Failed AI generation triggers automatic credit refund", async () => {
     const user = "test_refund_user";
 
-    // Initially 5 credits
+    // Initially 2 credits
     const initial = await getUserCredits(user);
-    assert.equal(initial.creditsRemaining, 5);
+    assert.equal(initial.creditsRemaining, 2);
 
-    // Reserve 1 credit -> remaining = 4
+    // Reserve 1 credit -> remaining = 1
     const reserve = await reserveDailyCredit(user, { reason: "About to call AI" });
     assert.equal(reserve.success, true);
-    assert.equal(reserve.remaining, 4);
+    assert.equal(reserve.remaining, 1);
     assert.equal(reserve.creditsUsed, 1);
 
     // AI service fails (e.g. 422 No face detected or 502 Upstream timeout)
     const refund = await refundDailyCredit(user, "AI Error: 422 No face detected");
     assert.equal(refund.success, true, "Refund must succeed");
-    assert.equal(refund.remaining, 5, "Balance must be restored to 5");
+    assert.equal(refund.remaining, 2, "Balance must be restored to 2");
 
     // Verify in database
     const afterRefund = await getUserCredits(user);
-    assert.equal(afterRefund.creditsRemaining, 5, "Database balance must be restored to 5");
+    assert.equal(afterRefund.creditsRemaining, 2, "Database balance must be restored to 2");
     assert.equal(afterRefund.creditsUsed, 0, "Database used count must be restored to 0");
   });
 
@@ -258,7 +258,7 @@ async function main() {
 
     db.prepare(`
       UPDATE user_credits
-      SET credits_used = 5,
+      SET credits_used = 2,
           credits_remaining = 0,
           last_reset_date = ?,
           updated_at = ?
@@ -268,7 +268,7 @@ async function main() {
 
     // Query credits today -> reset should trigger automatically!
     const todayRecord = await getUserCredits(user);
-    assert.equal(todayRecord.creditsRemaining, 5, "Credits must reset back to 5 for new day");
+    assert.equal(todayRecord.creditsRemaining, 2, "Credits must reset back to 2 for new day");
     assert.equal(todayRecord.creditsUsed, 0, "Credits used must reset to 0 for new day");
     assert.equal(todayRecord.lastResetDate, getTodayDateString("Asia/Kolkata"));
   });
@@ -311,8 +311,8 @@ async function main() {
     });
     const mobileId = resolveUserIdentity(mobileReq, phone);
 
-    // Exhaust all 5 credits on Device A
-    for (let i = 0; i < 5; i++) {
+    // Exhaust all 2 credits on Device A
+    for (let i = 0; i < 2; i++) {
       await reserveDailyCredit(mobileId.userId);
     }
 
@@ -361,14 +361,12 @@ async function main() {
     db.close();
   });
 
-  // Scenario 12: Multiple server instances maintain the same credit balance
+  // Scenario 13: Multiple server instances maintain the same credit balance
   await runAsyncTest("Multiple server instances / DB connections maintain the same atomic credit balance", async () => {
     const user = "test_multi_instance_user";
 
-    // Instance 1 consumes 3 credits
+    // Instance 1 consumes 1 credit out of 2
     await reserveDailyCredit(user, { reason: "Instance 1 request 1" });
-    await reserveDailyCredit(user, { reason: "Instance 1 request 2" });
-    await reserveDailyCredit(user, { reason: "Instance 1 request 3" });
 
     // Simulate Instance 2 connecting directly to the same database file
     const { createRequire } = await import("node:module");
@@ -382,8 +380,8 @@ async function main() {
       .prepare("SELECT credits_remaining, credits_used FROM user_credits WHERE user_id = ?")
       .get(user) as { credits_remaining: number; credits_used: number };
 
-    assert.equal(row.credits_remaining, 2, "Instance 2 must see 2 remaining credits");
-    assert.equal(row.credits_used, 3, "Instance 2 must see 3 used credits");
+    assert.equal(row.credits_remaining, 1, "Instance 2 must see 1 remaining credit");
+    assert.equal(row.credits_used, 1, "Instance 2 must see 1 used credit");
 
     // Instance 2 executes atomic conditional deduction
     instance2Db.exec("BEGIN IMMEDIATE;");
@@ -401,8 +399,43 @@ async function main() {
 
     // Instance 1 reads again -> must immediately see the deduction made by Instance 2
     const finalRecord = await getUserCredits(user);
-    assert.equal(finalRecord.creditsRemaining, 1, "Instance 1 must reflect Instance 2 deduction (1 credit left)");
-    assert.equal(finalRecord.creditsUsed, 4, "Instance 1 must reflect Instance 2 deduction (4 credits used)");
+    assert.equal(finalRecord.creditsRemaining, 0, "Instance 1 must reflect Instance 2 deduction (0 credits left)");
+    assert.equal(finalRecord.creditsUsed, 2, "Instance 1 must reflect Instance 2 deduction (2 credits used)");
+  });
+
+  // Scenario 14: Session-to-Phone Identity Linking across page reloads without phone query param
+  await runAsyncTest("Session cookie retains link to phone identity when reloaded without phone query param", async () => {
+    const testSessionId = "usr_reload_link_test";
+    const testToken = createSessionToken(testSessionId);
+    const testPhone = "9988776655";
+
+    // 1. Initial generation with phone number attached
+    const postReq = new Request("http://localhost:3000/api/hairstyle", {
+      method: "POST",
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(testToken)}`,
+      },
+    });
+    const postIdentity = resolveUserIdentity(postReq, testPhone);
+    assert.equal(postIdentity.userId, `user:phone:${testPhone}`);
+
+    // Deduct 1 credit
+    const res = await reserveDailyCredit(postIdentity.userId);
+    assert.equal(res.remaining, 1);
+    assert.equal(res.creditsUsed, 1);
+
+    // 2. User reloads page or switches tabs -> calls GET /api/rate-limit WITHOUT phone parameter!
+    const reloadReq = new Request("http://localhost:3000/api/rate-limit", {
+      headers: {
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(testToken)}`,
+      },
+    });
+    const reloadIdentity = resolveUserIdentity(reloadReq);
+    assert.equal(reloadIdentity.userId, `user:phone:${testPhone}`, "Session must resolve back to linked phone account!");
+
+    const reloadedCredits = await getUserCredits(reloadIdentity.userId);
+    assert.equal(reloadedCredits.creditsRemaining, 1, "Remaining credits must be 1 (not reset to 2)");
+    assert.equal(reloadedCredits.creditsUsed, 1, "Credits used must be 1");
   });
 
   console.log("\n=======================================================");

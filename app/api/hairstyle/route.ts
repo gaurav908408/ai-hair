@@ -562,6 +562,10 @@ export async function POST(request: Request) {
         "X-RateLimit-Reset",
         String(Math.floor(reservation.resetTimestamp / 1000))
       );
+      generationResponse.headers.set(
+        "Access-Control-Expose-Headers",
+        "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-User-Id, Retry-After"
+      );
 
       if (identity.isNewSession || identity.sessionToken) {
         setSessionCookieHeader(generationResponse.headers, identity.sessionToken);
@@ -571,19 +575,38 @@ export async function POST(request: Request) {
     }
 
     // 9. Attach updated credit balance & session cookie to successful response
-    generationResponse.headers.set("X-RateLimit-Limit", String(reservation.limit));
-    generationResponse.headers.set("X-RateLimit-Remaining", String(reservation.remaining));
-    generationResponse.headers.set(
-      "X-RateLimit-Reset",
-      String(Math.floor(reservation.resetTimestamp / 1000))
+    const resultJson = (await generationResponse.json()) as { image?: string };
+
+    const rateLimitPayload = {
+      limit: reservation.limit,
+      remaining: reservation.remaining,
+      creditsUsed: reservation.creditsUsed,
+      resetTimestamp: reservation.resetTimestamp,
+      retryAfterSeconds: reservation.retryAfterSeconds,
+    };
+
+    const finalResponse = NextResponse.json(
+      {
+        image: resultJson.image,
+        rateLimit: rateLimitPayload,
+      },
+      {
+        headers: {
+          "X-RateLimit-Limit": String(reservation.limit),
+          "X-RateLimit-Remaining": String(reservation.remaining),
+          "X-RateLimit-Reset": String(Math.floor(reservation.resetTimestamp / 1000)),
+          "X-User-Id": identity.userId,
+          "Access-Control-Expose-Headers":
+            "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, X-User-Id, Retry-After",
+        },
+      }
     );
-    generationResponse.headers.set("X-User-Id", identity.userId);
 
     if (identity.isNewSession || identity.sessionToken) {
-      setSessionCookieHeader(generationResponse.headers, identity.sessionToken);
+      setSessionCookieHeader(finalResponse.headers, identity.sessionToken);
     }
 
-    return generationResponse;
+    return finalResponse;
   } finally {
     releaseConcurrencyLock(identity.userId);
   }

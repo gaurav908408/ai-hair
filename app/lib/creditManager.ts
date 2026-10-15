@@ -51,7 +51,7 @@ export interface BurstRateLimitResult {
 // Default configuration
 const DEFAULT_DAILY_LIMIT = Math.max(
   1,
-  parseInt(process.env.DAILY_CREDIT_LIMIT || process.env.RATE_LIMIT_MAX_REQUESTS || "5", 10)
+  parseInt(process.env.DAILY_CREDIT_LIMIT || process.env.RATE_LIMIT_MAX_REQUESTS || "2", 10)
 );
 const DEFAULT_TIMEZONE = process.env.RESET_TIMEZONE || "Asia/Kolkata";
 
@@ -86,6 +86,7 @@ const activeUserGenerations = new Set<string>();
 // Memory fallback store for serverless cold-starts or environments without native sqlite
 const memoryCreditsStore = new Map<string, UserCreditRecord>();
 const memoryBurstStore = new Map<string, { count: number; expiresAt: number }>();
+const memorySessionStore = new Map<string, { canonicalUserId: string; phone?: string | null }>();
 
 /**
  * Resets db instance (used during testing to switch databases)
@@ -103,7 +104,77 @@ export function resetDatabaseInstanceForTesting(): void {
   initFailed = false;
   memoryCreditsStore.clear();
   memoryBurstStore.clear();
+  memorySessionStore.clear();
   activeUserGenerations.clear();
+}
+
+/**
+ * Links a browser session ID (from HttpOnly cookie) to a canonical user account (e.g. user:phone:<phone>).
+ * Persists in SQLite and in-memory fallback.
+ */
+export function linkSessionToCanonicalUser(
+  sessionId: string,
+  canonicalUserId: string,
+  phone?: string | null
+): void {
+  const cleanSession = (sessionId || "").trim();
+  const cleanCanonical = (canonicalUserId || "").trim();
+  if (!cleanSession || !cleanCanonical) return;
+
+  memorySessionStore.set(cleanSession, { canonicalUserId: cleanCanonical, phone });
+
+  const db = getDatabase();
+  if (db) {
+    try {
+      db.prepare(`
+        INSERT INTO user_sessions (session_id, canonical_user_id, phone, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(session_id) DO UPDATE SET
+          canonical_user_id = excluded.canonical_user_id,
+          phone = COALESCE(excluded.phone, user_sessions.phone),
+          updated_at = excluded.updated_at
+      `).run(cleanSession, cleanCanonical, phone || null, Date.now());
+    } catch (err) {
+      console.error("[CreditManager] Failed to link session to canonical user:", err);
+    }
+  }
+}
+
+/**
+ * Resolves the canonical user identity for a session ID, if one was previously linked.
+ */
+export function getCanonicalUserForSession(
+  sessionId: string
+): { canonicalUserId: string; phone: string | null } | null {
+  const cleanSession = (sessionId || "").trim();
+  if (!cleanSession) return null;
+
+  const db = getDatabase();
+  if (db) {
+    try {
+      const row = db
+        .prepare("SELECT canonical_user_id, phone FROM user_sessions WHERE session_id = ?")
+        .get(cleanSession) as { canonical_user_id: string; phone: string | null } | undefined;
+      if (row?.canonical_user_id) {
+        return {
+          canonicalUserId: row.canonical_user_id,
+          phone: row.phone || null,
+        };
+      }
+    } catch {
+      // fallback to memory
+    }
+  }
+
+  const mem = memorySessionStore.get(cleanSession);
+  if (mem) {
+    return {
+      canonicalUserId: mem.canonicalUserId,
+      phone: mem.phone || null,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -231,6 +302,17 @@ function getDatabase(): SQLiteDatabaseSync | null {
       CREATE INDEX IF NOT EXISTS idx_bursts_expires ON rate_limit_bursts(expires_at);
     `);
 
+    // 4. Session-to-canonical user mapping table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        session_id TEXT PRIMARY KEY,
+        canonical_user_id TEXT NOT NULL,
+        phone TEXT,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_canonical ON user_sessions(canonical_user_id);
+    `);
+
     dbInstance = db;
     isInitialized = true;
     return dbInstance;
@@ -250,6 +332,9 @@ export async function getUserCredits(
   options?: { phone?: string | null; hardwareHash?: string | null; ip?: string | null }
 ): Promise<UserCreditRecord> {
   const cleanId = (userId || "").trim();
+  const canonical = getCanonicalUserForSession(cleanId);
+  const targetId = canonical ? canonical.canonicalUserId : cleanId;
+  const effectivePhone = options?.phone || canonical?.phone || null;
   const now = Date.now();
   const todayStr = getTodayDateString(DEFAULT_TIMEZONE);
   const resetTimestamp = getNextResetTimestamp(DEFAULT_TIMEZONE);
@@ -262,7 +347,17 @@ export async function getUserCredits(
       db.exec("BEGIN IMMEDIATE;");
       let row = db
         .prepare("SELECT * FROM user_credits WHERE user_id = ?")
-        .get(cleanId) as Record<string, unknown> | undefined;
+        .get(targetId) as Record<string, unknown> | undefined;
+
+      // Also check if user can be recognized by phone if phone is provided
+      if (!row && effectivePhone) {
+        const phoneRow = db
+          .prepare("SELECT * FROM user_credits WHERE user_id = ? OR phone = ?")
+          .get(`user:phone:${effectivePhone}`, effectivePhone) as Record<string, unknown> | undefined;
+        if (phoneRow) {
+          row = phoneRow;
+        }
+      }
 
       // Also check if user can be recognized by hardwareHash if anonymous session is empty
       if (!row && options?.hardwareHash) {
@@ -282,14 +377,14 @@ export async function getUserCredits(
             last_reset_date, reset_timezone, updated_at, created_at, phone, hardware_hash, last_ip
           ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
-          cleanId,
+          targetId,
           DEFAULT_DAILY_LIMIT,
           DEFAULT_DAILY_LIMIT,
           todayStr,
           DEFAULT_TIMEZONE,
           now,
           now,
-          options?.phone || null,
+          effectivePhone,
           options?.hardwareHash || null,
           options?.ip || null
         );
@@ -297,7 +392,7 @@ export async function getUserCredits(
         db.exec("COMMIT;");
 
         return {
-          userId: cleanId,
+          userId: targetId,
           dailyCreditLimit: DEFAULT_DAILY_LIMIT,
           creditsUsed: 0,
           creditsRemaining: DEFAULT_DAILY_LIMIT,
@@ -307,7 +402,7 @@ export async function getUserCredits(
           createdAt: now,
           resetTimestamp,
           retryAfterSeconds: 0,
-          phone: options?.phone,
+          phone: effectivePhone || undefined,
           hardwareHash: options?.hardwareHash,
           lastIp: options?.ip,
         };
@@ -316,6 +411,7 @@ export async function getUserCredits(
       // Case 2: Daily reset is due (new day in configured timezone)
       const lastReset = String(row.last_reset_date || "");
       const limit = Number(row.daily_credit_limit) || DEFAULT_DAILY_LIMIT;
+      const actualUserId = String(row.user_id);
 
       if (lastReset !== todayStr) {
         db.prepare(`
@@ -325,18 +421,18 @@ export async function getUserCredits(
               last_reset_date = ?,
               updated_at = ?
           WHERE user_id = ?
-        `).run(todayStr, now, cleanId);
+        `).run(todayStr, now, actualUserId);
 
         // Record reset in audit ledger
         db.prepare(`
           INSERT INTO credit_transactions (user_id, action, amount, balance_after, reason, ip_address, created_at)
           VALUES (?, 'reset', ?, ?, 'Daily midnight reset', ?, ?)
-        `).run(cleanId, limit, limit, options?.ip || null, now);
+        `).run(actualUserId, limit, limit, options?.ip || null, now);
 
         db.exec("COMMIT;");
 
         return {
-          userId: cleanId,
+          userId: actualUserId,
           dailyCreditLimit: limit,
           creditsUsed: 0,
           creditsRemaining: limit,
@@ -346,7 +442,7 @@ export async function getUserCredits(
           createdAt: Number(row.created_at) || now,
           resetTimestamp,
           retryAfterSeconds: 0,
-          phone: (row.phone as string) || options?.phone,
+          phone: (row.phone as string) || effectivePhone || undefined,
           hardwareHash: (row.hardware_hash as string) || options?.hardwareHash,
           lastIp: options?.ip,
         };
@@ -359,7 +455,7 @@ export async function getUserCredits(
       const used = Number(row.credits_used);
 
       return {
-        userId: cleanId,
+        userId: actualUserId,
         dailyCreditLimit: limit,
         creditsUsed: used,
         creditsRemaining: remaining,
@@ -369,7 +465,7 @@ export async function getUserCredits(
         createdAt: Number(row.created_at) || now,
         resetTimestamp,
         retryAfterSeconds: remaining <= 0 ? retryAfterSeconds : 0,
-        phone: (row.phone as string) || options?.phone,
+        phone: (row.phone as string) || effectivePhone || undefined,
         hardwareHash: (row.hardware_hash as string) || options?.hardwareHash,
         lastIp: options?.ip,
       };
@@ -383,10 +479,10 @@ export async function getUserCredits(
   }
 
   // Memory Fallback Store
-  let mem = memoryCreditsStore.get(cleanId);
+  let mem = memoryCreditsStore.get(targetId);
   if (!mem) {
     mem = {
-      userId: cleanId,
+      userId: targetId,
       dailyCreditLimit: DEFAULT_DAILY_LIMIT,
       creditsUsed: 0,
       creditsRemaining: DEFAULT_DAILY_LIMIT,
@@ -396,11 +492,11 @@ export async function getUserCredits(
       createdAt: now,
       resetTimestamp,
       retryAfterSeconds: 0,
-      phone: options?.phone,
+      phone: effectivePhone || undefined,
       hardwareHash: options?.hardwareHash,
       lastIp: options?.ip,
     };
-    memoryCreditsStore.set(cleanId, mem);
+    memoryCreditsStore.set(targetId, mem);
     return mem;
   }
 
@@ -430,6 +526,9 @@ export async function reserveDailyCredit(
   metadata?: { ip?: string; phone?: string; hardwareHash?: string; reason?: string }
 ): Promise<CreditReservationResult> {
   const cleanId = (userId || "").trim();
+  const canonical = getCanonicalUserForSession(cleanId);
+  const targetId = canonical ? canonical.canonicalUserId : cleanId;
+  const effectivePhone = metadata?.phone || canonical?.phone || undefined;
   const now = Date.now();
   const todayStr = getTodayDateString(DEFAULT_TIMEZONE);
   const resetTimestamp = getNextResetTimestamp(DEFAULT_TIMEZONE);
@@ -443,7 +542,17 @@ export async function reserveDailyCredit(
 
       let row = db
         .prepare("SELECT * FROM user_credits WHERE user_id = ?")
-        .get(cleanId) as Record<string, unknown> | undefined;
+        .get(targetId) as Record<string, unknown> | undefined;
+
+      // Also check if user can be recognized by phone if phone is provided
+      if (!row && effectivePhone) {
+        const phoneRow = db
+          .prepare("SELECT * FROM user_credits WHERE user_id = ? OR phone = ?")
+          .get(`user:phone:${effectivePhone}`, effectivePhone) as Record<string, unknown> | undefined;
+        if (phoneRow) {
+          row = phoneRow;
+        }
+      }
 
       // Handle brand new user during reservation
       if (!row) {
@@ -453,23 +562,24 @@ export async function reserveDailyCredit(
             last_reset_date, reset_timezone, updated_at, created_at, phone, hardware_hash, last_ip
           ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
-          cleanId,
+          targetId,
           DEFAULT_DAILY_LIMIT,
           DEFAULT_DAILY_LIMIT,
           todayStr,
           DEFAULT_TIMEZONE,
           now,
           now,
-          metadata?.phone || null,
+          effectivePhone || null,
           metadata?.hardwareHash || null,
           metadata?.ip || null
         );
 
         row = db
           .prepare("SELECT * FROM user_credits WHERE user_id = ?")
-          .get(cleanId) as Record<string, unknown>;
+          .get(targetId) as Record<string, unknown>;
       }
 
+      const actualUserId = String(row.user_id);
       const limit = Number(row.daily_credit_limit) || DEFAULT_DAILY_LIMIT;
       let remaining = Number(row.credits_remaining);
       let used = Number(row.credits_used);
@@ -485,7 +595,7 @@ export async function reserveDailyCredit(
               last_reset_date = ?,
               updated_at = ?
           WHERE user_id = ?
-        `).run(todayStr, now, cleanId);
+        `).run(todayStr, now, actualUserId);
       }
 
       // Strict check: if no credits left, reject atomically!
@@ -515,9 +625,9 @@ export async function reserveDailyCredit(
       `).run(
         now,
         metadata?.ip || null,
-        metadata?.phone || null,
+        effectivePhone || null,
         metadata?.hardwareHash || null,
-        cleanId
+        actualUserId
       );
 
       if (updateResult.changes === 0) {
@@ -541,7 +651,7 @@ export async function reserveDailyCredit(
       db.prepare(`
         INSERT INTO credit_transactions (user_id, action, amount, balance_after, reason, ip_address, created_at)
         VALUES (?, 'reserve', 1, ?, ?, ?, ?)
-      `).run(cleanId, newRemaining, metadata?.reason || "Hairstyle Generation", metadata?.ip || null, now);
+      `).run(actualUserId, newRemaining, metadata?.reason || "Hairstyle Generation", metadata?.ip || null, now);
 
       db.exec("COMMIT;");
 
@@ -564,7 +674,7 @@ export async function reserveDailyCredit(
   }
 
   // Memory fallback logic
-  const record = await getUserCredits(cleanId, metadata);
+  const record = await getUserCredits(targetId, metadata);
   if (record.creditsRemaining <= 0) {
     return {
       success: false,
@@ -580,7 +690,7 @@ export async function reserveDailyCredit(
   record.creditsRemaining -= 1;
   record.creditsUsed += 1;
   record.updatedAt = now;
-  memoryCreditsStore.set(cleanId, record);
+  memoryCreditsStore.set(targetId, record);
 
   return {
     success: true,
@@ -600,6 +710,8 @@ export async function refundDailyCredit(
   reason: string = "AI Generation Refund"
 ): Promise<{ success: boolean; remaining: number }> {
   const cleanId = (userId || "").trim();
+  const canonical = getCanonicalUserForSession(cleanId);
+  const targetId = canonical ? canonical.canonicalUserId : cleanId;
   const now = Date.now();
   const db = getDatabase();
 
@@ -609,9 +721,10 @@ export async function refundDailyCredit(
 
       const row = db
         .prepare("SELECT * FROM user_credits WHERE user_id = ?")
-        .get(cleanId) as Record<string, unknown> | undefined;
+        .get(targetId) as Record<string, unknown> | undefined;
 
       if (row) {
+        const actualUserId = String(row.user_id);
         const limit = Number(row.daily_credit_limit) || DEFAULT_DAILY_LIMIT;
         db.prepare(`
           UPDATE user_credits
@@ -619,18 +732,18 @@ export async function refundDailyCredit(
               credits_remaining = MIN(daily_credit_limit, credits_remaining + 1),
               updated_at = ?
           WHERE user_id = ?
-        `).run(now, cleanId);
+        `).run(now, actualUserId);
 
         const updatedRow = db
           .prepare("SELECT credits_remaining FROM user_credits WHERE user_id = ?")
-          .get(cleanId) as { credits_remaining: number };
+          .get(actualUserId) as { credits_remaining: number };
 
         const newRemaining = updatedRow?.credits_remaining ?? 1;
 
         db.prepare(`
           INSERT INTO credit_transactions (user_id, action, amount, balance_after, reason, ip_address, created_at)
           VALUES (?, 'refund', 1, ?, ?, NULL, ?)
-        `).run(cleanId, newRemaining, reason, now);
+        `).run(actualUserId, newRemaining, reason, now);
 
         db.exec("COMMIT;");
         return { success: true, remaining: newRemaining };
@@ -648,7 +761,7 @@ export async function refundDailyCredit(
   }
 
   // Memory fallback refund
-  const mem = memoryCreditsStore.get(cleanId);
+  const mem = memoryCreditsStore.get(targetId);
   if (mem) {
     mem.creditsRemaining = Math.min(mem.dailyCreditLimit, mem.creditsRemaining + 1);
     mem.creditsUsed = Math.max(0, mem.creditsUsed - 1);

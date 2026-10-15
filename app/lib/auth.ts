@@ -12,6 +12,10 @@
  */
 
 import crypto from "node:crypto";
+import {
+  linkSessionToCanonicalUser,
+  getCanonicalUserForSession,
+} from "./creditManager.ts";
 
 export const SESSION_COOKIE_NAME = "bhg_session";
 
@@ -199,8 +203,11 @@ export function resolveUserIdentity(
   // 2. Identity Hierarchy:
   // If user entered phone number (e.g. Lead modal or account), bind directly to phone account!
   if (cleanPhone) {
+    const canonicalUserId = `user:phone:${cleanPhone}`;
+    linkSessionToCanonicalUser(sessionUserId, canonicalUserId, cleanPhone);
+
     return {
-      userId: `user:phone:${cleanPhone}`,
+      userId: canonicalUserId,
       sessionUserId,
       sessionToken,
       isNewSession,
@@ -211,7 +218,22 @@ export function resolveUserIdentity(
     };
   }
 
-  // Otherwise, default to server-authenticated session ID
+  // 3. Check if current session cookie was previously linked to a canonical phone account
+  const linked = getCanonicalUserForSession(sessionUserId);
+  if (linked) {
+    return {
+      userId: linked.canonicalUserId,
+      sessionUserId,
+      sessionToken,
+      isNewSession,
+      identityType: "phone",
+      cleanPhone: linked.phone,
+      hardwareHash: cleanHwHash,
+      clientIp,
+    };
+  }
+
+  // 4. Otherwise, default to server-authenticated session ID
   return {
     userId: sessionUserId,
     sessionUserId,

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:credits": "npx tsx test/credit-system.test.ts"
+    "test:credits": "node --experimental-strip-types test/credit-system.test.ts"
   },
   "dependencies": {
     "lucide-react": "^1.53.0",
