@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { HairstyleOption } from "../data/hairstyles";
 import { getVisitorIdentification } from "../utils/fingerprint";
 import HairPhotoUpload from "./HairPhotoUpload";
@@ -23,6 +23,7 @@ export default function HairGeneratorSection() {
   const [leadPhone, setLeadPhone] = useState<string>("");
   const [rateLimitInfo, setRateLimitInfo] = useState<{
     remaining: number;
+    creditsUsed?: number;
     limit: number;
     resetTimestamp?: number;
   } | null>(null);
@@ -31,31 +32,63 @@ export default function HairGeneratorSection() {
   const resultRef = useRef<HTMLDivElement>(null);
   const generationRequestRef = useRef(0);
 
-  // Initialize fingerprint silently and fetch remaining free quota
-  useEffect(() => {
-    getVisitorIdentification()
-      .then((visitor) => {
-        fetch("/api/rate-limit", {
-          headers: {
-            "X-Visitor-Id": visitor.visitorId,
-            "X-Hardware-Hash": visitor.hardwareHash,
-            "X-Device-Id": visitor.deviceId,
-          },
-        })
-          .then((res) => res.json())
-          .then((data) => {
-            if (data && typeof data.remaining === "number") {
-              setRateLimitInfo({
-                remaining: data.remaining,
-                limit: data.limit,
-                resetTimestamp: data.resetTimestamp,
-              });
-            }
-          })
-          .catch(() => {});
-      })
-      .catch(() => {});
+  /**
+   * Fetches authoritative credit balance from backend database.
+   * Consistent across tabs, reloads, and browser sessions.
+   */
+  const fetchCreditStatus = useCallback(async (phone?: string) => {
+    try {
+      const visitor = await getVisitorIdentification();
+      const phoneQuery = phone ? `?phone=${encodeURIComponent(phone)}` : "";
+      const res = await fetch(`/api/rate-limit${phoneQuery}`, {
+        headers: {
+          "X-Visitor-Id": visitor.visitorId,
+          "X-Hardware-Hash": visitor.hardwareHash,
+          "X-Device-Id": visitor.deviceId,
+        },
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && typeof data.remaining === "number") {
+        setRateLimitInfo({
+          remaining: data.remaining,
+          creditsUsed: data.creditsUsed ?? Math.max(0, data.limit - data.remaining),
+          limit: data.limit,
+          resetTimestamp: data.resetTimestamp,
+        });
+      }
+    } catch {
+      // silent network fallback
+    }
   }, []);
+
+  // 1. Initial credit fetch on mount
+  useEffect(() => {
+    fetchCreditStatus(leadPhone);
+  }, [fetchCreditStatus, leadPhone]);
+
+  // 2. Tab switching & window focus synchronization:
+  // When user switches tabs or refocuses window, fetch the real balance from server
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchCreditStatus(leadPhone);
+      }
+    };
+
+    const handleFocus = () => {
+      fetchCreditStatus(leadPhone);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [fetchCreditStatus, leadPhone]);
 
   useEffect(() => {
     return () => {
@@ -96,6 +129,13 @@ export default function HairGeneratorSection() {
     if (!photo || isGenerating) {
       return;
     }
+    // Block modal if user has exhausted their credits
+    if (rateLimitInfo && rateLimitInfo.remaining <= 0) {
+      setGenerationError(
+        "You have used all your daily credits. Your credits will reset at the next reset time."
+      );
+      return;
+    }
     setPendingHairstyle(hairstyle);
     setGenerationError("");
     setShowLeadModal(true);
@@ -123,6 +163,14 @@ export default function HairGeneratorSection() {
       return;
     }
 
+    if (rateLimitInfo && rateLimitInfo.remaining <= 0) {
+      setGenerationError(
+        "You have used all your daily credits. Your credits will reset at the next reset time."
+      );
+      return;
+    }
+
+    const currentPhone = leadDetails?.phone || leadPhone;
     const requestId = ++generationRequestRef.current;
     setIsGenerating(true);
     setGenerationError("");
@@ -142,6 +190,8 @@ export default function HairGeneratorSection() {
         form.set("firstName", leadDetails.firstName);
         form.set("lastName", leadDetails.lastName);
         form.set("phone", leadDetails.phone);
+      } else if (currentPhone) {
+        form.set("phone", currentPhone);
       }
 
       const response = await fetch("/api/hairstyle", {
@@ -154,14 +204,18 @@ export default function HairGeneratorSection() {
         body: form,
       });
 
+      // Update credit balance directly from server response headers
       const remainingHeader = response.headers.get("X-RateLimit-Remaining");
       const limitHeader = response.headers.get("X-RateLimit-Limit");
       const resetHeader = response.headers.get("X-RateLimit-Reset");
       if (remainingHeader !== null && limitHeader !== null) {
+        const rem = parseInt(remainingHeader, 10);
+        const lim = parseInt(limitHeader, 10);
         setRateLimitInfo({
-          remaining: parseInt(remainingHeader, 10),
-          limit: parseInt(limitHeader, 10),
-          resetTimestamp: resetHeader ? parseInt(resetHeader, 10) * 1000 : Date.now() + 3600000,
+          remaining: rem,
+          creditsUsed: Math.max(0, lim - rem),
+          limit: lim,
+          resetTimestamp: resetHeader ? parseInt(resetHeader, 10) * 1000 : Date.now() + 86400000,
         });
       }
 
@@ -171,6 +225,7 @@ export default function HairGeneratorSection() {
         rateLimit?: {
           limit: number;
           remaining: number;
+          creditsUsed?: number;
           resetTimestamp: number;
           retryAfterSeconds: number;
         };
@@ -180,12 +235,14 @@ export default function HairGeneratorSection() {
         if (response.status === 429 && result.rateLimit) {
           setRateLimitInfo({
             remaining: 0,
+            creditsUsed: result.rateLimit.limit,
             limit: result.rateLimit.limit,
             resetTimestamp: result.rateLimit.resetTimestamp,
           });
         }
         throw new Error(result.error || "Unable to generate the hairstyle.");
       }
+
       if (!result.image?.startsWith("data:image/")) {
         throw new Error("The image service returned an invalid result.");
       }
@@ -200,13 +257,15 @@ export default function HairGeneratorSection() {
         setGenerationError(
           error instanceof Error
             ? error.message
-            : "Unable to generate the hairstyle. Please try again.",
+            : "Unable to generate the hairstyle. Please try again."
         );
       }
     } finally {
       if (generationRequestRef.current === requestId) {
         setIsGenerating(false);
       }
+      // Re-synchronize credit balance from database
+      fetchCreditStatus(currentPhone);
     }
   };
 

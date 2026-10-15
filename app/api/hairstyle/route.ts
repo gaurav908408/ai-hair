@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
 import OpenAI, { toFile } from "openai";
-import { checkAndConsumeRateLimit, refundRateLimit } from "@/app/lib/rateLimiter";
+import {
+  resolveUserIdentity,
+  extractClientIp,
+  setSessionCookieHeader,
+} from "@/app/lib/auth";
+import {
+  reserveDailyCredit,
+  refundDailyCredit,
+  acquireConcurrencyLock,
+  releaseConcurrencyLock,
+  checkBurstRateLimit,
+} from "@/app/lib/creditManager";
 
 export const runtime = "nodejs";
 // Allow up to 60 seconds for serverless function execution on Vercel
@@ -50,7 +61,7 @@ async function generateWithAILab(
   photo: File,
   hairstyle: { name: string; file: string; apiId: string; legacyId?: number },
   apiKey: string,
-  endpointUrl: string,
+  endpointUrl: string
 ): Promise<NextResponse> {
   const isProEndpoint = !endpointUrl.endsWith("/hairstyle-editor");
 
@@ -60,12 +71,10 @@ async function generateWithAILab(
 
   const formData = new FormData();
   if (isProEndpoint) {
-    // Hairstyle Changer Pro contract: 'image', 'hair_style', and 'task_type'="async"
     formData.append("image", new Blob([imageBytes], { type: mimeType }), fileName);
     formData.append("hair_style", hairstyle.apiId);
     formData.append("task_type", "async");
   } else {
-    // Legacy Hairstyle Changer contract: 'image_target' and numeric 'hair_type'
     formData.append("image_target", new Blob([imageBytes], { type: mimeType }), fileName);
     formData.append("hair_type", String(hairstyle.legacyId ?? 101));
   }
@@ -84,7 +93,7 @@ async function generateWithAILab(
     console.error("[AILabTools] Connection error:", errorMsg);
     return NextResponse.json(
       { error: "Could not connect to the AI Lab hairstyle service. Please check your network and try again." },
-      { status: 502 },
+      { status: 502 }
     );
   }
 
@@ -96,7 +105,6 @@ async function generateWithAILab(
     // Upstream returned non-JSON body
   }
 
-  // Safe server-side telemetry: never log raw API keys or binary image contents
   const errorCode =
     (result?.error_detail as { code?: string } | undefined)?.code ||
     (result?.error_code_str as string | undefined) ||
@@ -111,30 +119,19 @@ async function generateWithAILab(
     (result?.message as string | undefined) ||
     (result?.error as string | undefined);
 
-  const requestId = (result?.request_id as string | undefined) || "N/A";
-  const logId = (result?.log_id as string | undefined) || "N/A";
-
-  console.log(
-    `[AILabTools] Submission Response - Status: ${response.status}, Request ID: ${requestId}, Log ID: ${logId}, Error Code: ${errorCode ?? 0}, Error Msg: ${errorMsg ?? "None"}`
-  );
-
   // Handle immediate upstream failure (HTTP 4xx/5xx or non-zero error_code)
   if (!response.ok || (typeof result?.error_code === "number" && result.error_code !== 0)) {
-    console.error(
-      `[AILabTools] Submission Error Details - Status: ${response.status}, Request ID: ${requestId}, Log ID: ${logId}, Code: ${errorCode ?? "N/A"}, Msg: ${errorMsg ?? "N/A"}`
-    );
-
     let userMessage = errorMsg || "The AI Lab hairstyle service could not process this photo.";
 
     if (response.status === 401 || userMessage.toLowerCase().includes("invalid api key")) {
-      userMessage = "Invalid or unauthorized AILabTools API key. Please verify your AILABAPI_API_KEY configuration in Vercel.";
+      userMessage = "Invalid or unauthorized AILabTools API key configuration.";
     } else if (
       response.status === 403 ||
       errorCode === "NO_AVAILABLE_BALANCE" ||
       userMessage.toLowerCase().includes("balance") ||
       userMessage.toLowerCase().includes("quota")
     ) {
-      userMessage = "AILabTools quota or account balance exhausted. Please check your AILabTools credits.";
+      userMessage = "AILabTools service balance exhausted. Please contact system administrator.";
     } else if (response.status === 404 || errorCode === "ERROR_AI_NOT_EXISTS") {
       userMessage = `AILabTools endpoint not found or deactivated (${endpointUrl}).`;
     } else if (
@@ -156,7 +153,8 @@ async function generateWithAILab(
 
   // If sync result with immediate image
   const dataObj = result?.data as Record<string, unknown> | undefined;
-  const immediateBase64 = (dataObj?.image as string | undefined) || (dataObj?.result_image as string | undefined);
+  const immediateBase64 =
+    (dataObj?.image as string | undefined) || (dataObj?.result_image as string | undefined);
   if (immediateBase64) {
     const cleanB64 = immediateBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
     return NextResponse.json({ image: `data:image/png;base64,${cleanB64}` });
@@ -179,7 +177,7 @@ async function generateWithAILab(
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[AILabTools] Polling attempt ${attempt} network warning:`, msg);
+        console.warn(`[AILabTools] Polling attempt ${attempt} warning:`, msg);
         continue;
       }
 
@@ -188,86 +186,86 @@ async function generateWithAILab(
       try {
         queryData = JSON.parse(queryRaw) as Record<string, unknown>;
       } catch {
-        console.warn(`[AILabTools] Polling attempt ${attempt} non-JSON response:`, queryRaw);
         continue;
       }
 
-      const pollErrorDetail = queryData?.error_detail as { code?: string; message?: string; code_message?: string } | undefined;
+      const pollErrorDetail = queryData?.error_detail as
+        | { code?: string; message?: string; code_message?: string }
+        | undefined;
       const pollTaskStatus = queryData?.task_status as number | undefined;
       const pollErrorCode = queryData?.error_code as number | undefined;
 
       // Check for async task failure (task_status === 3 or non-zero error_code)
       if (pollTaskStatus === 3 || (typeof pollErrorCode === "number" && pollErrorCode !== 0)) {
-        console.error(
-          `[AILabTools] Async Task Failed - Task ID: ${taskId}, Status: ${pollTaskStatus}, Code: ${pollErrorCode}, Msg: ${queryData?.error_msg || pollErrorDetail?.message}`
-        );
-        const pollCode = pollErrorDetail?.code;
-        let failMessage =
+        const asyncErrorCode =
+          pollErrorDetail?.code ||
+          (queryData?.error_code_str as string | undefined) ||
+          (typeof pollErrorCode === "number" ? String(pollErrorCode) : "ASYNC_ERROR");
+
+        const asyncErrorMsg =
           pollErrorDetail?.message ||
           pollErrorDetail?.code_message ||
           (queryData?.error_msg as string | undefined) ||
           (queryData?.message as string | undefined) ||
-          "Hairstyle processing failed.";
+          "Generation failed during async processing.";
 
-        if (pollCode === "ERROR_NO_FACE_IN_FILE" || failMessage.toLowerCase().includes("no face")) {
-          failMessage = "No face detected in the photo. Please upload a clear, front-facing portrait.";
+        let userMessage = asyncErrorMsg;
+        if (
+          asyncErrorCode === "ERROR_NO_FACE_IN_FILE" ||
+          asyncErrorMsg.toLowerCase().includes("no face detected") ||
+          asyncErrorMsg.toLowerCase().includes("no face")
+        ) {
+          userMessage = "No face detected in the photo. Please upload a clear, front-facing portrait.";
         }
 
-        return NextResponse.json({ error: `AI Lab error: ${failMessage}` }, { status: 422 });
+        return NextResponse.json({ error: `AI Lab error: ${userMessage}` }, { status: 422 });
       }
 
-      // Check for success (task_status === 2 or data with image available)
-      const pollData = queryData?.data as Record<string, unknown> | undefined;
-      const pollImages = pollData?.images as string[] | undefined;
-      const imageUrl =
-        pollImages?.[0] ||
-        (pollData?.image_url as string | undefined) ||
-        (pollData?.result_image as string | undefined);
-      const base64Image = pollData?.image as string | undefined;
+      // Check for async task completion (task_status === 2)
+      if (pollTaskStatus === 2) {
+        const asyncData = queryData?.data as Record<string, unknown> | undefined;
+        const resultUrl =
+          (asyncData?.result_url as string | undefined) ||
+          (asyncData?.image_url as string | undefined) ||
+          (asyncData?.url as string | undefined);
+        const resultBase64 =
+          (asyncData?.image as string | undefined) ||
+          (asyncData?.result_image as string | undefined);
 
-      if (pollTaskStatus === 2 || imageUrl || base64Image) {
-        if (base64Image) {
-          const cleanB64 = base64Image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+        if (resultBase64) {
+          const cleanB64 = resultBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
           return NextResponse.json({ image: `data:image/png;base64,${cleanB64}` });
         }
 
-        if (!imageUrl) {
-          return NextResponse.json(
-            { error: "AI Lab returned a success status but no image URL was found." },
-            { status: 502 },
-          );
+        if (resultUrl) {
+          try {
+            const imgRes = await fetch(resultUrl);
+            if (imgRes.ok) {
+              const buffer = await imgRes.arrayBuffer();
+              const b64 = Buffer.from(buffer).toString("base64");
+              return NextResponse.json({ image: `data:image/png;base64,${b64}` });
+            }
+          } catch (err: unknown) {
+            console.error("[AILabTools] Image download error:", err);
+          }
         }
 
-        try {
-          const imgFetch = await fetch(imageUrl, {
-            signal: AbortSignal.timeout(15000),
-          });
-          if (!imgFetch.ok) {
-            throw new Error(`Failed to download result image from CDN (HTTP ${imgFetch.status})`);
-          }
-          const imgBuffer = await imgFetch.arrayBuffer();
-          const base64 = Buffer.from(imgBuffer).toString("base64");
-          return NextResponse.json({ image: `data:image/png;base64,${base64}` });
-        } catch (downloadErr: unknown) {
-          const msg = downloadErr instanceof Error ? downloadErr.message : String(downloadErr);
-          console.error("[AILabTools] Download generated image error:", msg);
-          return NextResponse.json(
-            { error: "Could not download the generated hairstyle image from AI Lab CDN." },
-            { status: 502 },
-          );
-        }
+        return NextResponse.json(
+          { error: "Hairstyle transformation finished but no image could be retrieved." },
+          { status: 502 }
+        );
       }
     }
 
     return NextResponse.json(
-      { error: "Hairstyle generation timed out. Please try again with a smaller image." },
-      { status: 504 },
+      { error: "Generation timed out. Please try again with a smaller or clearer photo." },
+      { status: 504 }
     );
   }
 
   return NextResponse.json(
-    { error: "The AI Lab hairstyle service returned no task or result image. Please try again." },
-    { status: 502 },
+    { error: "The AI service response was incomplete. Please try again." },
+    { status: 502 }
   );
 }
 
@@ -277,7 +275,7 @@ async function generateWithAILab(
 async function generateWithOpenAI(
   photo: File,
   hairstyle: { name: string; file: string; apiId: string },
-  apiKey: string,
+  apiKey: string
 ): Promise<NextResponse> {
   const openai = new OpenAI({ apiKey });
   const photoBuffer = Buffer.from(await photo.arrayBuffer());
@@ -321,16 +319,30 @@ export async function POST(request: Request) {
   if (contentLength > MAX_IMAGE_BYTES * 2 + 1024 * 1024) {
     return NextResponse.json(
       { error: "The uploaded request is too large. Please use a photo smaller than 10 MB." },
-      { status: 413 },
+      { status: 413 }
     );
   }
 
-  // Support all common variable naming variations and sanitize quotes / whitespace
+  // 1. Client IP & Burst Rate Limit Abuse Check
+  const clientIp = extractClientIp(request);
+  const burst = checkBurstRateLimit(clientIp, 20, 60);
+  if (!burst.allowed) {
+    return NextResponse.json(
+      {
+        error: "Too many requests. Please wait a moment before trying again.",
+      },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(burst.retryAfterSeconds),
+        },
+      }
+    );
+  }
+
+  // 2. Validate provider credentials
   const rawAiLabApiKey =
-    process.env.AILABAPI_API_KEY ||
-    process.env.AILAB_API_KEY ||
-    process.env.AI_LAB_API_KEY ||
-    process.env.NEXT_PUBLIC_AILABAPI_API_KEY;
+    process.env.AILABAPI_API_KEY || process.env.AILAB_API_KEY || process.env.AI_LAB_API_KEY;
 
   const aiLabApiKey = rawAiLabApiKey
     ? rawAiLabApiKey.trim().replace(/^["']|["']$/g, "").trim()
@@ -351,25 +363,22 @@ export async function POST(request: Request) {
     ? rawOpenAiApiKey.trim().replace(/^["']|["']$/g, "").trim()
     : "";
 
-  // Verify at least one provider is configured
   if (!aiLabApiKey && !openAiApiKey) {
     return NextResponse.json(
       {
         error:
           "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in your environment variables.",
       },
-      { status: 503 },
+      { status: 503 }
     );
   }
 
+  // 3. Read and validate form payload
   let form: FormData;
   try {
     form = await request.formData();
   } catch {
-    return NextResponse.json(
-      { error: "Unable to read the submitted photo." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "Unable to read the submitted photo." }, { status: 400 });
   }
 
   const photo = form.get("photo");
@@ -377,23 +386,17 @@ export async function POST(request: Request) {
   if (!(photo instanceof File) || typeof hairstyleId !== "string") {
     return NextResponse.json(
       { error: "A photo and hairstyle selection are required." },
-      { status: 400 },
+      { status: 400 }
     );
   }
   if (!ALLOWED_IMAGE_TYPES.has(photo.type)) {
-    return NextResponse.json(
-      { error: "Please upload a JPG or PNG photo." },
-      { status: 415 },
-    );
+    return NextResponse.json({ error: "Please upload a JPG or PNG photo." }, { status: 415 });
   }
   if (photo.size === 0 || photo.size > MAX_IMAGE_BYTES) {
-    return NextResponse.json(
-      { error: "The photo must be smaller than 10 MB." },
-      { status: 413 },
-    );
+    return NextResponse.json({ error: "The photo must be smaller than 10 MB." }, { status: 413 });
   }
 
-  // Validate hairstyle selection against supported hairstyles
+  // Validate hairstyle selection
   const hairstyle = SUPPORTED_AILAB_HAIRSTYLES[hairstyleId];
   if (!hairstyle) {
     return NextResponse.json(
@@ -401,96 +404,131 @@ export async function POST(request: Request) {
         error:
           "Please select a valid supported hairstyle (e.g. Textured Fringe, Comb Over, Undercut Long Hair, Pompadour, Slick Back, Faux Hawk, Low Fade, High Tight Fade).",
       },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
-  // 1. Client Identification Layer (Incognito-Proof Hardware Fingerprint)
-  // hardwareHash is derived from Canvas, WebGL, Audio, CPU, RAM, and Screen.
-  // It does NOT change when opening an Incognito or Private window!
-  const hardwareHash =
+  // 4. Server-Side Identity Resolution
+  // Extract user phone (from lead modal / account) and hardware hash (secondary signal)
+  const phoneInput =
+    typeof form.get("phone") === "string" ? (form.get("phone") as string) : null;
+  const hardwareHashInput =
     request.headers.get("x-hardware-hash") ||
     (typeof form.get("hardwareHash") === "string" ? (form.get("hardwareHash") as string) : null);
 
-  const fallbackVisitorId =
-    request.headers.get("x-visitor-id") ||
-    request.headers.get("x-device-id") ||
-    (typeof form.get("visitorId") === "string" ? (form.get("visitorId") as string) : null);
+  const identity = resolveUserIdentity(request, phoneInput, hardwareHashInput);
 
-  // Extract client IP (handles CGNAT / proxies / cloudflare)
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  const clientIp =
-    (forwardedFor ? forwardedFor.split(",")[0].trim() : null) ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("cf-connecting-ip") ||
-    "127.0.0.1";
-
-  // Primary unique key: hardwareHash ensures Incognito tabs cannot bypass daily limit
-  const visitorId = (hardwareHash || fallbackVisitorId || clientIp).trim();
-
-  // 2. Zero-Infrastructure Rate Limiter (Embedded SQLite + Cloud Sync)
-  const rateLimitResult = await checkAndConsumeRateLimit(visitorId, clientIp);
-
-  if (!rateLimitResult.allowed) {
-    const waitTime =
-      rateLimitResult.retryAfterSeconds >= 3600
-        ? `${Math.ceil(rateLimitResult.retryAfterSeconds / 3600)} hour${Math.ceil(rateLimitResult.retryAfterSeconds / 3600) > 1 ? "s" : ""}`
-        : `${Math.max(1, Math.ceil(rateLimitResult.retryAfterSeconds / 60))} minute${Math.ceil(rateLimitResult.retryAfterSeconds / 60) > 1 ? "s" : ""}`;
-
+  // 5. Concurrency Control: Prevent parallel generation requests from the same user
+  const lockAcquired = acquireConcurrencyLock(identity.userId);
+  if (!lockAcquired) {
     return NextResponse.json(
       {
-        error: `Daily free quota exceeded (${rateLimitResult.limit} styles per day). Please try again in ${waitTime}, or speak with our hair specialist!`,
-        rateLimit: {
-          limit: rateLimitResult.limit,
-          remaining: 0,
-          resetTimestamp: rateLimitResult.resetTimestamp,
-          retryAfterSeconds: rateLimitResult.retryAfterSeconds,
-        },
+        error: "A hairstyle generation is already in progress for your account. Please wait for it to complete.",
       },
       {
         status: 429,
         headers: {
-          "Retry-After": String(rateLimitResult.retryAfterSeconds),
-          "X-RateLimit-Limit": String(rateLimitResult.limit),
-          "X-RateLimit-Remaining": "0",
-          "X-RateLimit-Reset": String(Math.floor(rateLimitResult.resetTimestamp / 1000)),
+          "Retry-After": "5",
         },
       }
     );
   }
 
-  // 3. Trigger AI Hair Transformation Model
-  let generationResponse: NextResponse;
+  try {
+    // 6. Database Atomic Credit Reservation: Reserve 1 credit BEFORE expensive AI operation
+    const reservation = await reserveDailyCredit(identity.userId, {
+      ip: identity.clientIp,
+      phone: identity.cleanPhone || undefined,
+      hardwareHash: identity.hardwareHash || undefined,
+      reason: `Generate Hairstyle: ${hairstyle.name}`,
+    });
 
-  // Priority 1: Use AI Lab Hairstyle Endpoint if configured
-  if (aiLabApiKey) {
-    generationResponse = await generateWithAILab(photo, hairstyle, aiLabApiKey, aiLabEndpoint);
-  } else if (openAiApiKey) {
-    // Priority 2: Use OpenAI Image Generation
-    generationResponse = await generateWithOpenAI(photo, hairstyle, openAiApiKey);
-  } else {
-    return NextResponse.json(
-      {
-        error:
-          "Image generation is not configured. Please ensure AILABAPI_API_KEY is configured in your environment variables.",
-      },
-      { status: 503 },
-    );
-  }
+    if (!reservation.success) {
+      const waitHours = Math.ceil(reservation.retryAfterSeconds / 3600);
+      const waitText =
+        waitHours > 1
+          ? `in ${waitHours} hours`
+          : `in ${Math.max(1, Math.ceil(reservation.retryAfterSeconds / 60))} minutes`;
 
-  // If generation failed due to invalid photo / no face detected (422), refund credit
-  if (!generationResponse.ok) {
-    if (generationResponse.status === 422) {
-      await refundRateLimit(visitorId);
+      const response = NextResponse.json(
+        {
+          error: `You have used all your daily credits (${reservation.limit}/${reservation.limit} styles used). Your credits will reset ${waitText}.`,
+          rateLimit: {
+            limit: reservation.limit,
+            remaining: 0,
+            creditsUsed: reservation.creditsUsed,
+            resetTimestamp: reservation.resetTimestamp,
+            retryAfterSeconds: reservation.retryAfterSeconds,
+          },
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(reservation.retryAfterSeconds),
+            "X-RateLimit-Limit": String(reservation.limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(Math.floor(reservation.resetTimestamp / 1000)),
+          },
+        }
+      );
+
+      if (identity.isNewSession || identity.sessionToken) {
+        setSessionCookieHeader(response.headers, identity.sessionToken);
+      }
+
+      return response;
     }
+
+    // 7. Invoke AI Model Provider
+    let generationResponse: NextResponse;
+    if (aiLabApiKey) {
+      generationResponse = await generateWithAILab(photo, hairstyle, aiLabApiKey, aiLabEndpoint);
+    } else if (openAiApiKey) {
+      generationResponse = await generateWithOpenAI(photo, hairstyle, openAiApiKey);
+    } else {
+      await refundDailyCredit(identity.userId, "Missing AI Provider Configuration");
+      return NextResponse.json(
+        { error: "Image generation provider is not configured." },
+        { status: 503 }
+      );
+    }
+
+    // 8. Handle Failure: Refund reserved credit if AI generation failed (422, 5xx, timeouts)
+    if (!generationResponse.ok) {
+      const refundResult = await refundDailyCredit(
+        identity.userId,
+        `AI Generation Failed (${generationResponse.status})`
+      );
+
+      generationResponse.headers.set("X-RateLimit-Limit", String(reservation.limit));
+      generationResponse.headers.set("X-RateLimit-Remaining", String(refundResult.remaining));
+      generationResponse.headers.set(
+        "X-RateLimit-Reset",
+        String(Math.floor(reservation.resetTimestamp / 1000))
+      );
+
+      if (identity.isNewSession || identity.sessionToken) {
+        setSessionCookieHeader(generationResponse.headers, identity.sessionToken);
+      }
+
+      return generationResponse;
+    }
+
+    // 9. Attach updated credit balance & session cookie to successful response
+    generationResponse.headers.set("X-RateLimit-Limit", String(reservation.limit));
+    generationResponse.headers.set("X-RateLimit-Remaining", String(reservation.remaining));
+    generationResponse.headers.set(
+      "X-RateLimit-Reset",
+      String(Math.floor(reservation.resetTimestamp / 1000))
+    );
+    generationResponse.headers.set("X-User-Id", identity.userId);
+
+    if (identity.isNewSession || identity.sessionToken) {
+      setSessionCookieHeader(generationResponse.headers, identity.sessionToken);
+    }
+
     return generationResponse;
+  } finally {
+    releaseConcurrencyLock(identity.userId);
   }
-
-  // Attach standard rate limit headers to successful response
-  generationResponse.headers.set("X-RateLimit-Limit", String(rateLimitResult.limit));
-  generationResponse.headers.set("X-RateLimit-Remaining", String(rateLimitResult.remaining));
-  generationResponse.headers.set("X-RateLimit-Reset", String(Math.floor(rateLimitResult.resetTimestamp / 1000)));
-  generationResponse.headers.set("X-Visitor-Id", visitorId);
-
-  return generationResponse;
 }

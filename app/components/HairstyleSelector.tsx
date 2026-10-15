@@ -15,7 +15,12 @@ type HairstyleSelectorProps = {
   isGenerating?: boolean;
   generationError?: string;
   className?: string;
-  rateLimitInfo?: { remaining: number; limit: number; resetTimestamp?: number } | null;
+  rateLimitInfo?: {
+    remaining: number;
+    creditsUsed?: number;
+    limit: number;
+    resetTimestamp?: number;
+  } | null;
 };
 
 export default function HairstyleSelector({
@@ -48,8 +53,28 @@ export default function HairstyleSelector({
   const selectedId = selectedHairstyleId ?? internalSelectedId;
   const selectedHairstyle =
     hairstyles.find((hairstyle) => hairstyle.id === selectedId) ?? null;
+  const isCreditExhausted = Boolean(rateLimitInfo && rateLimitInfo.remaining <= 0);
   const canGenerate =
-    hasPhoto && selectedHairstyle !== null && onGenerate !== undefined;
+    hasPhoto && selectedHairstyle !== null && onGenerate !== undefined && !isCreditExhausted;
+
+  const formatResetTime = (timestamp?: number) => {
+    if (!timestamp) return "the next daily reset time (midnight)";
+    try {
+      const date = new Date(timestamp);
+      const timeStr = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const now = Date.now();
+      const diffMs = timestamp - now;
+      if (diffMs > 0) {
+        const hours = Math.floor(diffMs / 3600000);
+        const mins = Math.floor((diffMs % 3600000) / 60000);
+        const relStr = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+        return `${timeStr} (in ${relStr})`;
+      }
+      return timeStr;
+    } catch {
+      return "the next daily reset time";
+    }
+  };
 
   const selectHairstyle = (hairstyle: HairstyleOption) => {
     setInternalSelectedId(hairstyle.id);
@@ -312,55 +337,80 @@ export default function HairstyleSelector({
       <footer className="-mx-4 sm:-mx-5 md:-mx-6 lg:-mx-6 shrink-0 border-t border-[#d6eeeb] bg-[#eaf8f6] px-4 sm:px-5 md:px-6 lg:px-6 pb-2.5 pt-3 sm:pb-3 sm:pt-4 mt-3 sm:mt-4">
         <button
           type="button"
-          disabled={!canGenerate || isGenerating}
+          disabled={!canGenerate || isGenerating || isCreditExhausted}
           onClick={() => {
-            if (selectedHairstyle && canGenerate) {
+            if (selectedHairstyle && canGenerate && !isCreditExhausted) {
               onGenerate(selectedHairstyle);
             }
           }}
           className="flex min-h-12 sm:min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-[#00bba7] px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] disabled:cursor-not-allowed disabled:bg-[#9aa3b2] disabled:text-white/90 shadow-xs cursor-pointer"
         >
           <Zap aria-hidden="true" size={18} fill="currentColor" />
-          {isGenerating ? "Generating your look..." : "Generate My Look"}
+          {isGenerating
+            ? "Generating your look..."
+            : isCreditExhausted
+              ? "Daily Limit Reached (0 Credits Left)"
+              : "Generate My Look"}
         </button>
 
-        {/* Free Quota Badge */}
-        {rateLimitInfo && (
+        {/* Free Quota Badge (Active) */}
+        {rateLimitInfo && !isCreditExhausted && (
           <div className="mt-2 flex items-center justify-between px-2 text-[11px] font-medium text-[#007064]">
             <span className="flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-[#00bba7] animate-pulse" />
               Daily Free Limit:
             </span>
             <span className="font-semibold">
-              {rateLimitInfo.remaining} / {rateLimitInfo.limit} styles remaining
+              {rateLimitInfo.remaining} / {rateLimitInfo.limit} styles remaining (
+              {rateLimitInfo.creditsUsed ?? Math.max(0, rateLimitInfo.limit - rateLimitInfo.remaining)}{" "}
+              used)
             </span>
           </div>
         )}
 
-        {generationError && (
+        {/* Prominent Daily Credits Exhausted Alert */}
+        {rateLimitInfo && isCreditExhausted && (
           <div
-            className={`mt-2.5 rounded-xl p-2.5 text-xs text-left ${
-              generationError.toLowerCase().includes("quota") ||
-              generationError.toLowerCase().includes("limit")
-                ? "border border-amber-300 bg-amber-50 text-amber-900"
-                : "border border-red-200 bg-red-50 text-red-700"
-            }`}
+            className="mt-2.5 rounded-xl border border-amber-300 bg-amber-50 p-3 text-left text-xs text-amber-900 shadow-2xs"
+            role="alert"
+          >
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-amber-500 shrink-0" />
+              <div className="flex-1">
+                <p className="font-bold text-amber-950">
+                  You have used all your daily credits.
+                </p>
+                <p className="mt-0.5 leading-relaxed text-amber-800">
+                  Your credits will reset at {formatResetTime(rateLimitInfo.resetTimestamp)}.
+                </p>
+                <div className="mt-1.5 flex items-center gap-2 text-[11px] font-semibold text-amber-900">
+                  <span>Remaining: 0</span>
+                  <span>•</span>
+                  <span>
+                    Used: {rateLimitInfo.creditsUsed ?? rateLimitInfo.limit} / {rateLimitInfo.limit}
+                  </span>
+                </div>
+                <a
+                  href={`https://wa.me/919999999999?text=${encodeURIComponent(
+                    "Hi! I reached my free AI hair preview quota on your website and would like to speak with a hair specialist."
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center gap-1 font-bold text-[#008c7c] hover:underline"
+                >
+                  Connect with our Hair Specialist on WhatsApp &rarr;
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {generationError && !isCreditExhausted && (
+          <div
+            className="mt-2.5 rounded-xl border border-red-200 bg-red-50 p-2.5 text-xs text-left text-red-700"
             role="alert"
           >
             <p className="font-medium leading-relaxed">{generationError}</p>
-            {(generationError.toLowerCase().includes("quota") ||
-              generationError.toLowerCase().includes("limit")) && (
-              <a
-                href={`https://wa.me/919999999999?text=${encodeURIComponent(
-                  "Hi! I reached my free AI hair preview quota on your website and would like to speak with a hair specialist."
-                )}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1.5 inline-flex items-center gap-1 font-bold text-[#008c7c] hover:underline"
-              >
-                Connect with our Hair Specialist on WhatsApp &rarr;
-              </a>
-            )}
           </div>
         )}
 

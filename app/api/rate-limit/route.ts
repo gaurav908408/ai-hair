@@ -1,48 +1,54 @@
 import { NextResponse } from "next/server";
-import { getRateLimitStatus } from "@/app/lib/rateLimiter";
+import { resolveUserIdentity, setSessionCookieHeader } from "@/app/lib/auth";
+import { getUserCredits } from "@/app/lib/creditManager";
 
 export const runtime = "nodejs";
 
 /**
  * GET /api/rate-limit
- * Retrieves current rate limit quota and reset epoch for the calling visitor.
+ * Retrieves current daily credit quota, usage, and reset epoch for the calling user.
  * Read-only: Does NOT consume quota credits.
+ * Issues a cryptographically signed HttpOnly session cookie if not present.
  */
 export async function GET(request: Request) {
-  // Extract visitor identity from headers (prioritize hardware hash for incognito resistance)
-  const hardwareHash = request.headers.get("x-hardware-hash");
-  const visitorId =
-    hardwareHash ||
-    request.headers.get("x-visitor-id") ||
-    request.headers.get("x-device-id");
+  const url = new URL(request.url);
+  const phoneParam = url.searchParams.get("phone");
+  const hardwareHashHeader = request.headers.get("x-hardware-hash");
 
-  // Extract client IP (handling proxies, CDN, CGNAT)
-  const forwardedFor = request.headers.get("x-forwarded-for");
-  const clientIp =
-    (forwardedFor ? forwardedFor.split(",")[0].trim() : null) ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("cf-connecting-ip") ||
-    "127.0.0.1";
+  // 1. Server-side identity resolution (signed HttpOnly cookie + optional phone/hardware hash)
+  const identity = resolveUserIdentity(request, phoneParam, hardwareHashHeader);
 
-  const identifier = (visitorId || clientIp).trim();
-  const status = await getRateLimitStatus(identifier);
+  // 2. Fetch authoritative credit balance from database
+  const record = await getUserCredits(identity.userId, {
+    phone: identity.cleanPhone,
+    hardwareHash: identity.hardwareHash,
+    ip: identity.clientIp,
+  });
 
-  return NextResponse.json(
+  const response = NextResponse.json(
     {
-      visitorId: identifier,
-      limit: status.limit,
-      remaining: status.remaining,
-      resetTimestamp: status.resetTimestamp,
-      retryAfterSeconds: status.retryAfterSeconds,
-      storageBackend: status.storageBackend,
+      userId: identity.userId,
+      limit: record.dailyCreditLimit,
+      remaining: record.creditsRemaining,
+      creditsUsed: record.creditsUsed,
+      resetTimestamp: record.resetTimestamp,
+      retryAfterSeconds: record.retryAfterSeconds,
+      resetTimezone: record.resetTimezone,
     },
     {
       headers: {
-        "X-RateLimit-Limit": String(status.limit),
-        "X-RateLimit-Remaining": String(status.remaining),
-        "X-RateLimit-Reset": String(Math.floor(status.resetTimestamp / 1000)),
+        "X-RateLimit-Limit": String(record.dailyCreditLimit),
+        "X-RateLimit-Remaining": String(record.creditsRemaining),
+        "X-RateLimit-Reset": String(Math.floor(record.resetTimestamp / 1000)),
         "Cache-Control": "no-store, max-age=0",
       },
     }
   );
+
+  // 3. Issue or refresh signed HttpOnly session cookie
+  if (identity.isNewSession || identity.sessionToken) {
+    setSessionCookieHeader(response.headers, identity.sessionToken);
+  }
+
+  return response;
 }
