@@ -10,9 +10,11 @@
     "test:credits": "node test/run.cjs"
   },
   "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "lucide-react": "^1.53.0",
     "next": "16.4.0",
     "openai": "^7.32.0",
+    "postcss": "^8.5.30",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "swiper": "^14.3.0"
