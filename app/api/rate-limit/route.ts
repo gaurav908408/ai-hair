@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { resolveUserIdentity, setSessionCookieHeader } from "@/app/lib/auth";
-import { getUserCredits } from "@/app/lib/creditManager";
+import { resolveUserIdentity, setSessionCookieHeader } from "../../lib/auth";
+import { getUserCredits } from "../../lib/creditManager";
 
 export const runtime = "nodejs";
 

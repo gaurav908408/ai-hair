@@ -4,14 +4,14 @@ import {
   resolveUserIdentity,
   extractClientIp,
   setSessionCookieHeader,
-} from "@/app/lib/auth";
+} from "../../lib/auth";
 import {
   reserveDailyCredit,
   refundDailyCredit,
   acquireConcurrencyLock,
   releaseConcurrencyLock,
   checkBurstRateLimit,
-} from "@/app/lib/creditManager";
+} from "../../lib/creditManager";
 
 export const runtime = "nodejs";
 // Allow up to 60 seconds for serverless function execution on Vercel
@@ -151,13 +151,68 @@ async function generateWithAILab(
     return NextResponse.json({ error: `AI Lab error: ${userMessage}` }, { status });
   }
 
+  // Helper to extract image URL or Base64 from any AILab response object
+  function extractImageUrlOrBase64(data: Record<string, unknown> | undefined): {
+    url?: string;
+    base64?: string;
+  } {
+    if (!data) return {};
+    // 1. Array of image URLs: standard AILabTools async output is { images: ["https://..."] }
+    if (Array.isArray(data.images) && data.images.length > 0 && typeof data.images[0] === "string") {
+      const val = data.images[0].trim();
+      if (val.startsWith("http://") || val.startsWith("https://")) return { url: val };
+      return { base64: val };
+    }
+    if (Array.isArray(data.image_list) && data.image_list.length > 0 && typeof data.image_list[0] === "string") {
+      const val = data.image_list[0].trim();
+      if (val.startsWith("http://") || val.startsWith("https://")) return { url: val };
+      return { base64: val };
+    }
+    // 2. Direct string fields
+    const candidates = [
+      data.result_url,
+      data.image_url,
+      data.url,
+      data.result_image,
+      data.image,
+      data.result,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim().length > 0) {
+        const val = candidate.trim();
+        if (val.startsWith("http://") || val.startsWith("https://")) {
+          return { url: val };
+        }
+        if (val.startsWith("data:image/") || val.length > 200) {
+          return { base64: val };
+        }
+      }
+    }
+    return {};
+  }
+
   // If sync result with immediate image
   const dataObj = result?.data as Record<string, unknown> | undefined;
-  const immediateBase64 =
-    (dataObj?.image as string | undefined) || (dataObj?.result_image as string | undefined);
-  if (immediateBase64) {
-    const cleanB64 = immediateBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+  const syncImage =
+    extractImageUrlOrBase64(dataObj).url || extractImageUrlOrBase64(dataObj).base64
+      ? extractImageUrlOrBase64(dataObj)
+      : extractImageUrlOrBase64(result || undefined);
+
+  if (syncImage.base64) {
+    const cleanB64 = syncImage.base64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
     return NextResponse.json({ image: `data:image/png;base64,${cleanB64}` });
+  }
+  if (syncImage.url) {
+    try {
+      const imgRes = await fetch(syncImage.url);
+      if (imgRes.ok) {
+        const buffer = await imgRes.arrayBuffer();
+        const b64 = Buffer.from(buffer).toString("base64");
+        return NextResponse.json({ image: `data:image/png;base64,${b64}` });
+      }
+    } catch (err: unknown) {
+      console.error("[AILabTools] Immediate image download error:", err);
+    }
   }
 
   // If async task, poll query endpoint
@@ -224,22 +279,19 @@ async function generateWithAILab(
       // Check for async task completion (task_status === 2)
       if (pollTaskStatus === 2) {
         const asyncData = queryData?.data as Record<string, unknown> | undefined;
-        const resultUrl =
-          (asyncData?.result_url as string | undefined) ||
-          (asyncData?.image_url as string | undefined) ||
-          (asyncData?.url as string | undefined);
-        const resultBase64 =
-          (asyncData?.image as string | undefined) ||
-          (asyncData?.result_image as string | undefined);
+        const extracted =
+          extractImageUrlOrBase64(asyncData).url || extractImageUrlOrBase64(asyncData).base64
+            ? extractImageUrlOrBase64(asyncData)
+            : extractImageUrlOrBase64(queryData || undefined);
 
-        if (resultBase64) {
-          const cleanB64 = resultBase64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+        if (extracted.base64) {
+          const cleanB64 = extracted.base64.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
           return NextResponse.json({ image: `data:image/png;base64,${cleanB64}` });
         }
 
-        if (resultUrl) {
+        if (extracted.url) {
           try {
-            const imgRes = await fetch(resultUrl);
+            const imgRes = await fetch(extracted.url);
             if (imgRes.ok) {
               const buffer = await imgRes.arrayBuffer();
               const b64 = Buffer.from(buffer).toString("base64");
@@ -250,6 +302,10 @@ async function generateWithAILab(
           }
         }
 
+        console.error(
+          "[AILabTools] Task finished (status 2) but no image found in response:",
+          JSON.stringify(queryData)
+        );
         return NextResponse.json(
           { error: "Hairstyle transformation finished but no image could be retrieved." },
           { status: 502 }
