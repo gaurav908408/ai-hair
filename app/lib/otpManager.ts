@@ -197,16 +197,33 @@ export async function createAndSendOtp(
     lastSentAt: now,
   });
 
-  // Dispatch SMS (Production SMS gateway hook)
+  // Dispatch SMS (Fast2SMS API integration for Indian numbers)
   const isProduction = process.env.NODE_ENV === "production";
   const isTest = process.env.NODE_ENV === "test" || process.env.CREDIT_SECRET_KEY?.includes("test");
 
-  // In production with real SMS gateway:
   const smsApiKey = process.env.SMS_API_KEY || process.env.FAST2SMS_API_KEY;
-  if (smsApiKey && isProduction) {
+  let smsSentSuccessfully = false;
+
+  if (smsApiKey) {
     try {
-      // Example Fast2SMS / Twilio hook
-      // await sendSmsViaGateway(phone, `Your AI Hair Generator verification code is: ${otp}. Valid for 5 minutes.`);
+      const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
+        method: "POST",
+        headers: {
+          authorization: smsApiKey.trim(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          route: "otp",
+          variables_values: otp,
+          numbers: phone,
+        }),
+      });
+      const smsData = (await smsRes.json()) as { return?: boolean; message?: string[] };
+      if (smsData && smsData.return) {
+        smsSentSuccessfully = true;
+      } else {
+        console.warn("[OTPManager] Fast2SMS dispatch warning:", smsData);
+      }
     } catch (err) {
       console.error("[OTPManager] Failed to send SMS via gateway:", err);
     }
@@ -217,11 +234,16 @@ export async function createAndSendOtp(
   console.log(`[SMS-SERVICE] Mobile: +91 ${phone} | OTP: [ ${otp} ]`);
   console.log(`======================================================\n`);
 
+  // If no SMS gateway API key is configured or SMS failed, return devOtp so user is never stuck
+  const shouldReturnOtp = !smsApiKey || !smsSentSuccessfully || !isProduction || isTest;
+
   return {
     success: true,
-    message: `Verification code sent to +91 ${phone}.`,
+    message: smsSentSuccessfully
+      ? `Verification code sent via SMS to +91 ${phone}.`
+      : `Verification code: ${otp} (sent for +91 ${phone}).`,
     retryAfterSeconds: 30,
-    devOtp: !isProduction || isTest ? otp : undefined,
+    devOtp: shouldReturnOtp ? otp : undefined,
   };
 }
 
