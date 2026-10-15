@@ -192,6 +192,25 @@ async function main() {
     assert.equal(attempt.remaining, 0);
   });
 
+  await runAsyncTest("A private browser session shares the same hardware credit balance", async () => {
+    const hardwareHash = "hw_incognito_credit_test";
+    const regularSessionId = "usr_regular_device_session";
+    const privateSessionId = "usr_private_device_session";
+
+    for (let i = 0; i < 2; i++) {
+      const reservation = await reserveDailyCredit(regularSessionId, { hardwareHash });
+      assert.equal(reservation.success, true);
+    }
+
+    const privateBalance = await getUserCredits(privateSessionId, { hardwareHash });
+    assert.equal(privateBalance.creditsRemaining, 0, "Private session must see the exhausted device balance");
+    assert.equal(privateBalance.creditsUsed, 2, "Private session must see both generations");
+
+    const privateAttempt = await reserveDailyCredit(privateSessionId, { hardwareHash });
+    assert.equal(privateAttempt.success, false, "Private session must not receive a fresh quota");
+    assert.equal(privateAttempt.remaining, 0);
+  });
+
   // Scenario 7: Simultaneous generation requests cannot exceed credit limit (Concurrency race condition test)
   await runAsyncTest("Simultaneous generation requests cannot exceed credit limit (Atomic locking)", async () => {
     const user = "test_concurrent_user";

@@ -359,11 +359,11 @@ export async function getUserCredits(
         }
       }
 
-      // Also check if user can be recognized by hardwareHash if anonymous session is empty
+      // Reuse the device's record when this browser session has not been seen before.
       if (!row && options?.hardwareHash) {
         const hwRow = db
-          .prepare("SELECT * FROM user_credits WHERE hardware_hash = ? AND last_reset_date = ?")
-          .get(options.hardwareHash, todayStr) as Record<string, unknown> | undefined;
+          .prepare("SELECT * FROM user_credits WHERE hardware_hash = ? ORDER BY updated_at DESC LIMIT 1")
+          .get(options.hardwareHash) as Record<string, unknown> | undefined;
         if (hwRow) {
           row = hwRow;
         }
@@ -480,6 +480,11 @@ export async function getUserCredits(
 
   // Memory Fallback Store
   let mem = memoryCreditsStore.get(targetId);
+  if (!mem && options?.hardwareHash) {
+    mem = Array.from(memoryCreditsStore.values()).find(
+      (record) => record.hardwareHash === options.hardwareHash
+    );
+  }
   if (!mem) {
     mem = {
       userId: targetId,
@@ -551,6 +556,16 @@ export async function reserveDailyCredit(
           .get(`user:phone:${effectivePhone}`, effectivePhone) as Record<string, unknown> | undefined;
         if (phoneRow) {
           row = phoneRow;
+        }
+      }
+
+      // Resolve a new browser session to the same device balance (including private windows).
+      if (!row && metadata?.hardwareHash) {
+        const hardwareRow = db
+          .prepare("SELECT * FROM user_credits WHERE hardware_hash = ? ORDER BY updated_at DESC LIMIT 1")
+          .get(metadata.hardwareHash) as Record<string, unknown> | undefined;
+        if (hardwareRow) {
+          row = hardwareRow;
         }
       }
 
@@ -690,7 +705,7 @@ export async function reserveDailyCredit(
   record.creditsRemaining -= 1;
   record.creditsUsed += 1;
   record.updatedAt = now;
-  memoryCreditsStore.set(targetId, record);
+  memoryCreditsStore.set(record.userId, record);
 
   return {
     success: true,
