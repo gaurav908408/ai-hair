@@ -2,17 +2,16 @@
  * Client-Side Digital Browser Fingerprinting Utility
  *
  * 100% Software-Based - Zero Physical Biometrics or Camera Required.
- * Computes a high-entropy, deterministic fingerprint from browser rendering engines,
- * hardware profiles (CPU, GPU, RAM, Screen), audio synthesis, and localization settings.
+ * Computes a deterministic fingerprint from stable browser, hardware, and localization settings.
  *
  * Safe for Incognito Mode, CGNAT (shared Jio/Airtel mobile IPs), and all device types
  * (Laptops, Desktops, Android, iPhone).
  */
 
 export interface VisitorIdentification {
-  /** Combined primary visitor ID (Hardware Hash + Device UUID) */
+  /** Stable primary visitor ID shared by regular and private windows on the same device */
   visitorId: string;
-  /** Pure hardware & browser rendering fingerprint (resilient to incognito/cleared cookies) */
+  /** Stable hardware and browser profile fingerprint */
   hardwareHash: string;
   /** Persistent anonymous device UUID from localStorage / cookie */
   deviceId: string;
@@ -139,48 +138,12 @@ async function hashString(str: string): Promise<string> {
 }
 
 /**
- * Generates an invisible 2D Canvas rendering fingerprint.
- * Sub-pixel anti-aliasing, emoji rendering, and GPU composition vary across devices.
+ * Extracts the GPU renderer for display diagnostics only; it is not part of the quota identity.
  */
-function getCanvasFingerprint(): string {
-  try {
-    if (typeof document === "undefined") return "no-dom";
-    const canvas = document.createElement("canvas");
-    canvas.width = 240;
-    canvas.height = 60;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return "no-canvas-2d";
-
-    ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#f60";
-    ctx.fillRect(12, 1, 62, 20);
-
-    ctx.fillStyle = "#069";
-    ctx.font = "14px 'Segoe UI', Arial, sans-serif";
-    ctx.fillText("AI Hair Gen \ud83d\udc87\u200d\u2642\ufe0f\u2728", 4, 17);
-
-    ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
-    ctx.font = "16px sans-serif";
-    ctx.fillText("C7#@!$%&", 60, 42);
-
-    ctx.strokeStyle = "#8b5cf6";
-    ctx.beginPath();
-    ctx.arc(180, 28, 18, 0, Math.PI * 2, true);
-    ctx.stroke();
-
-    return canvas.toDataURL();
-  } catch {
-    return "canvas-err";
-  }
-}
-
-/**
- * Extracts WebGL renderer, vendor, and GPU shader precision features.
- */
-function getWebGLFingerprint(): { renderer: string; vendor: string; fullHash: string } {
+function getWebGLRenderer(): string {
   try {
     if (typeof document === "undefined") {
-      return { renderer: "unknown", vendor: "unknown", fullHash: "no-dom" };
+      return "unknown";
     }
     const canvas = document.createElement("canvas");
     const gl =
@@ -188,87 +151,15 @@ function getWebGLFingerprint(): { renderer: string; vendor: string; fullHash: st
       (canvas.getContext("experimental-webgl") as WebGLRenderingContext | null);
 
     if (!gl) {
-      return { renderer: "unsupported", vendor: "unsupported", fullHash: "no-webgl" };
+      return "unsupported";
     }
 
     const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-    const vendor = debugInfo ? gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || "" : "";
     const renderer = debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || "" : "";
 
-    // WebGL attributes & limits
-    const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 0;
-    const maxRenderBufferSize = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) || 0;
-    const maxVertexTextureImageUnits = gl.getParameter(gl.MAX_VERTEX_TEXTURE_IMAGE_UNITS) || 0;
-    const glVersion = gl.getParameter(gl.VERSION) || "";
-    const shadingLanguage = gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || "";
-
-    const fullHash = [
-      vendor,
-      renderer,
-      maxTextureSize,
-      maxRenderBufferSize,
-      maxVertexTextureImageUnits,
-      glVersion,
-      shadingLanguage,
-    ].join("~");
-
-    return {
-      renderer: String(renderer || "standard-renderer"),
-      vendor: String(vendor || "standard-vendor"),
-      fullHash,
-    };
+    return String(renderer || "standard-renderer");
   } catch {
-    return { renderer: "error", vendor: "error", fullHash: "webgl-err" };
-  }
-}
-
-/**
- * Generates an audio synthesis frequency fingerprint via OfflineAudioContext.
- * 100% silent - DOES NOT use microphone or require any permission.
- * Hardware sound processing pipelines generate unique floating-point variations.
- */
-async function getAudioFingerprint(): Promise<string> {
-  try {
-    if (typeof window === "undefined") return "no-audio";
-    const AudioContextClass =
-      window.OfflineAudioContext ||
-      (window as unknown as { webkitOfflineAudioContext?: typeof OfflineAudioContext })
-        .webkitOfflineAudioContext;
-
-    if (!AudioContextClass) return "audio-unsupported";
-
-    const context = new AudioContextClass(1, 44100, 44100);
-    const oscillator = context.createOscillator();
-    oscillator.type = "triangle";
-    oscillator.frequency.setValueAtTime(10000, context.currentTime);
-
-    const compressor = context.createDynamicsCompressor();
-    compressor.threshold.setValueAtTime(-50, context.currentTime);
-    compressor.knee.setValueAtTime(40, context.currentTime);
-    compressor.ratio.setValueAtTime(12, context.currentTime);
-    compressor.attack.setValueAtTime(0, context.currentTime);
-    compressor.release.setValueAtTime(0.25, context.currentTime);
-
-    oscillator.connect(compressor);
-    compressor.connect(context.destination);
-    oscillator.start(0);
-
-    // Render with 250ms timeout protection
-    const renderPromise = context.startRendering();
-    const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 250));
-
-    const renderedBuffer = await Promise.race([renderPromise, timeoutPromise]);
-    if (!renderedBuffer) return "audio-timeout";
-
-    const channelData = renderedBuffer.getChannelData(0);
-    let sampleSum = 0;
-    // Sample every 10th value for fast calculation
-    for (let i = 4500; i < 5000; i++) {
-      sampleSum += Math.abs(channelData[i] || 0);
-    }
-    return sampleSum.toFixed(8);
-  } catch {
-    return "audio-disabled";
+    return "error";
   }
 }
 
@@ -381,16 +272,9 @@ export async function getVisitorIdentification(): Promise<VisitorIdentification>
     const languages = (navigator.languages || []).join(",");
     const platform = navigator.platform || "";
 
-    // 3. Digital rendering fingerprints (Canvas + WebGL + Audio)
-    const canvasFingerprint = getCanvasFingerprint();
-    const webgl = getWebGLFingerprint();
-    const audioFingerprint = await getAudioFingerprint();
-
-    // Bundle hardware profile (all fixed hardware & OS attributes)
+    // Rendering fingerprints can vary in private mode, so only stable browser/device
+    // attributes are used for the quota identity.
     const hardwarePayload = {
-      canvas: canvasFingerprint,
-      webgl: webgl.fullHash,
-      audio: audioFingerprint,
       cores,
       memoryGB,
       touchPoints,
@@ -398,13 +282,14 @@ export async function getVisitorIdentification(): Promise<VisitorIdentification>
       tz: `${timezone}:${timezoneOffset}`,
       lang: `${language}:${languages}`,
       plat: platform,
+      userAgent: navigator.userAgent,
     };
 
-    // Hardware Hash: 100% consistent across regular and private/incognito windows on same machine
+    const gpuRenderer = getWebGLRenderer();
     const rawHash = await hashString(JSON.stringify(hardwarePayload));
     const hardwareHash = `hw_${rawHash}`;
 
-    // Primary visitorId IS the hardwareHash so private tabs can NEVER bypass the quota
+    // The stable hardware hash is shared between regular and private windows.
     const visitorId = hardwareHash;
 
     return {
@@ -415,7 +300,7 @@ export async function getVisitorIdentification(): Promise<VisitorIdentification>
         cores,
         memoryGB,
         screen: `${screenWidth}x${screenHeight}`,
-        gpuRenderer: webgl.renderer,
+        gpuRenderer,
         timezone,
         language,
       },
