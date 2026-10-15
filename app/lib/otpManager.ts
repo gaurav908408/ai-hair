@@ -199,7 +199,9 @@ export async function createAndSendOtp(
 
   // Dispatch SMS (Fast2SMS for Indian numbers, Twilio fallback)
   const isTest = process.env.NODE_ENV === "test" || process.env.CREDIT_SECRET_KEY?.includes("test");
-  const fast2smsKey = process.env.FAST2SMS_API_KEY || process.env.SMS_API_KEY;
+  const DEFAULT_FAST2SMS_KEY =
+    "Fw9JQsDhIHymd305nEBo8fNSXxCb7TzG2VPgquYicrt41lZkjeQ7ksZtYUcMgRODWxLnP365SwAv4qKT";
+  const fast2smsKey = process.env.FAST2SMS_API_KEY || process.env.SMS_API_KEY || DEFAULT_FAST2SMS_KEY;
   const twilioSid = process.env.TWILIO_ACCOUNT_SID;
   const twilioToken = process.env.TWILIO_AUTH_TOKEN;
   const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
@@ -207,7 +209,7 @@ export async function createAndSendOtp(
   let smsSentSuccessfully = false;
   let smsErrorMessage: string | null = null;
 
-  if (fast2smsKey) {
+  if (fast2smsKey && !isTest) {
     try {
       const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
         method: "POST",
@@ -233,7 +235,7 @@ export async function createAndSendOtp(
       smsErrorMessage = err instanceof Error ? err.message : "Network error contacting SMS gateway";
       console.error("[OTPManager] Failed to send SMS via Fast2SMS:", err);
     }
-  } else if (twilioSid && twilioToken && twilioFrom) {
+  } else if (twilioSid && twilioToken && twilioFrom && !isTest) {
     try {
       const auth = Buffer.from(`${twilioSid.trim()}:${twilioToken.trim()}`).toString("base64");
       const params = new URLSearchParams();
