@@ -54,8 +54,7 @@ export default function HairstyleSelector({
   const selectedHairstyle =
     hairstyles.find((hairstyle) => hairstyle.id === selectedId) ?? null;
   const isCreditExhausted = Boolean(rateLimitInfo && rateLimitInfo.remaining <= 0);
-  const canGenerate =
-    hasPhoto && selectedHairstyle !== null && onGenerate !== undefined && !isCreditExhausted;
+  const canGenerate = hasPhoto && selectedHairstyle !== null && onGenerate !== undefined;
 
   const formatResetTime = (timestamp?: number) => {
     if (!timestamp) return "the next daily reset time (midnight)";
@@ -337,20 +336,16 @@ export default function HairstyleSelector({
       <footer className="-mx-4 sm:-mx-5 md:-mx-6 lg:-mx-6 shrink-0 border-t border-[#d6eeeb] bg-[#eaf8f6] px-4 sm:px-5 md:px-6 lg:px-6 pb-2.5 pt-3 sm:pb-3 sm:pt-4 mt-3 sm:mt-4">
         <button
           type="button"
-          disabled={!canGenerate || isGenerating || isCreditExhausted}
+          disabled={!canGenerate || isGenerating}
           onClick={() => {
-            if (selectedHairstyle && canGenerate && !isCreditExhausted) {
+            if (selectedHairstyle && canGenerate) {
               onGenerate(selectedHairstyle);
             }
           }}
           className="flex min-h-12 sm:min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-[#00bba7] px-3 sm:px-4 py-2.5 sm:py-3 text-sm sm:text-base font-bold text-white transition-colors hover:bg-[#00a392] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00a392] disabled:cursor-not-allowed disabled:bg-[#9aa3b2] disabled:text-white/90 shadow-xs cursor-pointer"
         >
           <Zap aria-hidden="true" size={18} fill="currentColor" />
-          {isGenerating
-            ? "Generating your look..."
-            : isCreditExhausted
-              ? "Daily Limit Reached (0 Credits Left)"
-              : "Generate My Look"}
+          {isGenerating ? "Generating your look..." : "Generate My Look"}
         </button>
 
         {/* Free Quota Badge (Active) */}

@@ -167,42 +167,8 @@ export default function HairGeneratorSection() {
     if (!photo || isGenerating) {
       return;
     }
-    // Block modal if user has exhausted their credits
-    if (rateLimitInfo && rateLimitInfo.remaining <= 0) {
-      setGenerationError(
-        "You have used all your daily credits. Your credits will reset at the next reset time."
-      );
-      return;
-    }
     setPendingHairstyle(hairstyle);
     setGenerationError("");
-
-    // If user already verified their phone in this browser, generate immediately!
-    const savedPhone =
-      leadPhone ||
-      (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
-    const savedToken =
-      verificationToken ||
-      (typeof window !== "undefined" ? localStorage.getItem("_bhg_verification_token") || "" : "");
-
-    if (savedPhone && savedToken) {
-      const savedFirst =
-        typeof window !== "undefined"
-          ? localStorage.getItem("_bhg_lead_first_name") || "Guest"
-          : "Guest";
-      const savedLast =
-        typeof window !== "undefined"
-          ? localStorage.getItem("_bhg_lead_last_name") || ""
-          : "";
-      executeGeneration(hairstyle, {
-        firstName: savedFirst,
-        lastName: savedLast,
-        phone: savedPhone,
-        verificationToken: savedToken,
-      });
-      return;
-    }
-
     setShowLeadModal(true);
   };
 

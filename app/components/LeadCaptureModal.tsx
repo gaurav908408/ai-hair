@@ -35,6 +35,27 @@ export default function LeadCaptureModal({
 
   const otpInputRef = useRef<HTMLInputElement>(null);
 
+  // Reset modal state and load saved phone/name when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setStep("details");
+      setOtp("");
+      setErrorMessage("");
+      setInfoMessage("");
+      try {
+        const savedPhone = localStorage.getItem("_bhg_lead_phone");
+        const savedFirst = localStorage.getItem("_bhg_lead_first_name");
+        const savedLast = localStorage.getItem("_bhg_lead_last_name");
+        if (savedPhone) setPhone(savedPhone);
+        if (savedFirst) setFirstName(savedFirst);
+        if (savedLast) setLastName(savedLast);
+        if (savedPhone && savedFirst) setAgreed(true);
+      } catch {
+        // ignore
+      }
+    }
+  }, [isOpen]);
+
   // Focus OTP input on step switch
   useEffect(() => {
     if (step === "otp") {
