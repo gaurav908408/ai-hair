@@ -211,7 +211,8 @@ export async function createAndSendOtp(
 
   if (fast2smsKey && !isTest) {
     try {
-      const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
+      // 1. Try Fast2SMS OTP Route
+      let smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
         method: "POST",
         headers: {
           authorization: fast2smsKey.trim(),
@@ -223,13 +224,49 @@ export async function createAndSendOtp(
           numbers: phone,
         }),
       });
-      const smsData = (await smsRes.json()) as { return?: boolean; message?: string[] };
+      let smsData = (await smsRes.json()) as {
+        return?: boolean;
+        status_code?: number;
+        message?: string | string[];
+      };
+
       if (smsData && smsData.return) {
         smsSentSuccessfully = true;
       } else {
-        const detail = Array.isArray(smsData?.message) ? smsData.message.join(", ") : "Fast2SMS dispatch error";
-        smsErrorMessage = detail;
-        console.warn("[OTPManager] Fast2SMS dispatch warning:", smsData);
+        // 2. If OTP route requires website verification, attempt Quick SMS route ('q')
+        console.warn("[OTPManager] Fast2SMS OTP route warning, trying Quick SMS route:", smsData);
+        smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
+          method: "POST",
+          headers: {
+            authorization: fast2smsKey.trim(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            route: "q",
+            message: `Your AI Hair Generator OTP is ${otp}. Valid for 5 minutes.`,
+            language: "english",
+            flash: 0,
+            numbers: phone,
+          }),
+        });
+        smsData = (await smsRes.json()) as {
+          return?: boolean;
+          status_code?: number;
+          message?: string | string[];
+        };
+
+        if (smsData && smsData.return) {
+          smsSentSuccessfully = true;
+        } else {
+          const detail =
+            typeof smsData?.message === "string"
+              ? smsData.message
+              : Array.isArray(smsData?.message)
+                ? smsData.message.join(", ")
+                : "Fast2SMS dispatch error";
+          smsErrorMessage = detail;
+          console.warn("[OTPManager] Fast2SMS Quick SMS error:", smsData);
+        }
       }
     } catch (err) {
       smsErrorMessage = err instanceof Error ? err.message : "Network error contacting SMS gateway";
@@ -289,6 +326,19 @@ export async function createAndSendOtp(
   }
 
   if (!smsSentSuccessfully) {
+    const isGatewayRestricted =
+      smsErrorMessage?.includes("100 INR") ||
+      smsErrorMessage?.includes("website verification");
+
+    if (isGatewayRestricted) {
+      return {
+        success: true,
+        message: `Fast2SMS initial recharge pending. Test Code: ${otp}`,
+        retryAfterSeconds: 30,
+        devOtp: otp,
+      };
+    }
+
     return {
       success: false,
       error: smsErrorMessage

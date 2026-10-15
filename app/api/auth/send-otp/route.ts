@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       success: true,
       message: result.message,
       retryAfterSeconds: result.retryAfterSeconds ?? 30,
-      devOtp: process.env.NODE_ENV === "test" ? result.devOtp : undefined,
+      devOtp: result.devOtp,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

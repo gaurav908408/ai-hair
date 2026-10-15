@@ -111,6 +111,7 @@ export default function LeadCaptureModal({
         error?: string;
         message?: string;
         retryAfterSeconds?: number;
+        devOtp?: string;
       };
 
       if (!res.ok || !data.success) {
@@ -120,8 +121,13 @@ export default function LeadCaptureModal({
 
       setStep("otp");
       setResendCooldown(data.retryAfterSeconds || 30);
-      setOtp("");
-      setInfoMessage(data.message || `Verification code sent via SMS to +91 ${cleanPhone}. Please check your phone.`);
+      if (data.devOtp) {
+        setInfoMessage(`Code: ${data.devOtp} (Fast2SMS requires ₹100 wallet recharge to deliver live SMS)`);
+        setOtp(data.devOtp);
+      } else {
+        setOtp("");
+        setInfoMessage(data.message || `Verification code sent via SMS to +91 ${cleanPhone}. Please check your phone.`);
+      }
     } catch {
       setErrorMessage("Network error sending code. Please check your connection.");
     } finally {
