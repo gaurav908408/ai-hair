@@ -197,19 +197,22 @@ export async function createAndSendOtp(
     lastSentAt: now,
   });
 
-  // Dispatch SMS (Fast2SMS API integration for Indian numbers)
-  const isProduction = process.env.NODE_ENV === "production";
+  // Dispatch SMS (Fast2SMS for Indian numbers, Twilio fallback)
   const isTest = process.env.NODE_ENV === "test" || process.env.CREDIT_SECRET_KEY?.includes("test");
+  const fast2smsKey = process.env.FAST2SMS_API_KEY || process.env.SMS_API_KEY;
+  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
 
-  const smsApiKey = process.env.SMS_API_KEY || process.env.FAST2SMS_API_KEY;
   let smsSentSuccessfully = false;
+  let smsErrorMessage: string | null = null;
 
-  if (smsApiKey) {
+  if (fast2smsKey) {
     try {
       const smsRes = await fetch("https://www.fast2sms.com/dev/bulkV2", {
         method: "POST",
         headers: {
-          authorization: smsApiKey.trim(),
+          authorization: fast2smsKey.trim(),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -222,28 +225,80 @@ export async function createAndSendOtp(
       if (smsData && smsData.return) {
         smsSentSuccessfully = true;
       } else {
+        const detail = Array.isArray(smsData?.message) ? smsData.message.join(", ") : "Fast2SMS dispatch error";
+        smsErrorMessage = detail;
         console.warn("[OTPManager] Fast2SMS dispatch warning:", smsData);
       }
     } catch (err) {
-      console.error("[OTPManager] Failed to send SMS via gateway:", err);
+      smsErrorMessage = err instanceof Error ? err.message : "Network error contacting SMS gateway";
+      console.error("[OTPManager] Failed to send SMS via Fast2SMS:", err);
+    }
+  } else if (twilioSid && twilioToken && twilioFrom) {
+    try {
+      const auth = Buffer.from(`${twilioSid.trim()}:${twilioToken.trim()}`).toString("base64");
+      const params = new URLSearchParams();
+      params.append("To", `+91${phone}`);
+      params.append("From", twilioFrom.trim());
+      params.append("Body", `Your AI Hair Generator verification code is: ${otp}. Valid for 5 minutes.`);
+
+      const twilioRes = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${twilioSid.trim()}/Messages.json`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Basic ${auth}`,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params.toString(),
+        }
+      );
+      const twilioData = (await twilioRes.json()) as { sid?: string; message?: string };
+      if (twilioRes.ok && twilioData?.sid) {
+        smsSentSuccessfully = true;
+      } else {
+        smsErrorMessage = twilioData?.message || "Twilio dispatch error";
+      }
+    } catch (err) {
+      smsErrorMessage = err instanceof Error ? err.message : "Twilio dispatch failed";
     }
   }
 
-  // Always log OTP to server console for testing/development inspection
+  // Log to server console for server administrator inspection
   console.log(`\n======================================================`);
-  console.log(`[SMS-SERVICE] Mobile: +91 ${phone} | OTP: [ ${otp} ]`);
+  console.log(`[SMS-SERVICE] Mobile: +91 ${phone} | OTP: [ ${otp} ] | Delivered: ${smsSentSuccessfully}`);
   console.log(`======================================================\n`);
 
-  // If no SMS gateway API key is configured or SMS failed, return devOtp so user is never stuck
-  const shouldReturnOtp = !smsApiKey || !smsSentSuccessfully || !isProduction || isTest;
+  // If in automated test runner, return devOtp for test assertions only
+  if (isTest) {
+    return {
+      success: true,
+      message: `Verification code sent to +91 ${phone}.`,
+      retryAfterSeconds: 30,
+      devOtp: otp,
+    };
+  }
+
+  // In live application, require valid SMS gateway dispatch
+  if (!fast2smsKey && !(twilioSid && twilioToken)) {
+    return {
+      success: false,
+      error: "SMS service is not configured. Please add FAST2SMS_API_KEY in environment variables to send verification SMS to user mobile.",
+    };
+  }
+
+  if (!smsSentSuccessfully) {
+    return {
+      success: false,
+      error: smsErrorMessage
+        ? `Unable to deliver SMS: ${smsErrorMessage}. Please check the number and try again.`
+        : "Failed to dispatch SMS to mobile network. Please check the number and try again.",
+    };
+  }
 
   return {
     success: true,
-    message: smsSentSuccessfully
-      ? `Verification code sent via SMS to +91 ${phone}.`
-      : `Verification code: ${otp} (sent for +91 ${phone}).`,
+    message: `Verification code sent via SMS to +91 ${phone}.`,
     retryAfterSeconds: 30,
-    devOtp: shouldReturnOtp ? otp : undefined,
   };
 }
 

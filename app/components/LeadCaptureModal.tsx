@@ -32,7 +32,6 @@ export default function LeadCaptureModal({
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [receivedOtp, setReceivedOtp] = useState<string | null>(null);
 
   const otpInputRef = useRef<HTMLInputElement>(null);
 
@@ -91,7 +90,6 @@ export default function LeadCaptureModal({
         error?: string;
         message?: string;
         retryAfterSeconds?: number;
-        devOtp?: string;
       };
 
       if (!res.ok || !data.success) {
@@ -101,15 +99,8 @@ export default function LeadCaptureModal({
 
       setStep("otp");
       setResendCooldown(data.retryAfterSeconds || 30);
-
-      if (data.devOtp) {
-        setReceivedOtp(data.devOtp);
-        setOtp(data.devOtp);
-        setInfoMessage(`Verification Code: ${data.devOtp} (Auto-filled below for testing)`);
-      } else {
-        setReceivedOtp(null);
-        setInfoMessage(`Verification code sent via SMS to +91 ${cleanPhone}.`);
-      }
+      setOtp("");
+      setInfoMessage(data.message || `Verification code sent via SMS to +91 ${cleanPhone}. Please check your phone.`);
     } catch {
       setErrorMessage("Network error sending code. Please check your connection.");
     } finally {
@@ -300,7 +291,6 @@ export default function LeadCaptureModal({
                 onClick={() => {
                   setStep("details");
                   setErrorMessage("");
-                  setReceivedOtp(null);
                   setOtp("");
                 }}
                 className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-[#18756f] hover:underline mb-2 cursor-pointer"
@@ -318,28 +308,16 @@ export default function LeadCaptureModal({
 
               {/* Subtitle */}
               <p className="mt-1.5 text-xs sm:text-sm md:text-base text-[#4b5563]">
-                Enter the 6-digit code sent to{" "}
+                Enter the 6-digit code sent via SMS to{" "}
                 <span className="font-bold text-[#111827]">+91 {phone}</span> to unlock your 2 daily hairstyles.
               </p>
 
-              {/* Prominent Verification Code Card for instant testing */}
-              {receivedOtp ? (
-                <div className="mt-4 p-3.5 bg-gradient-to-r from-[#eaf8f6] to-[#d8f3f0] border-2 border-[#86e1da] rounded-xl text-center shadow-xs">
-                  <p className="text-xs text-[#18756f] font-bold uppercase tracking-wider">
-                    Demo Verification Code
-                  </p>
-                  <p className="text-3xl font-mono font-extrabold text-[#115e59] tracking-[0.25em] my-1">
-                    {receivedOtp}
-                  </p>
-                  <p className="text-[12px] text-[#18756f]">
-                    Code auto-filled below. Click <strong>Verify &amp; Generate</strong> to proceed!
-                  </p>
-                </div>
-              ) : infoMessage ? (
+              {/* Info Message */}
+              {infoMessage && (
                 <div className="mt-3 rounded-lg bg-[#eaf8f6] border border-[#86e1da] p-2.5 text-xs sm:text-sm font-medium text-[#18756f]">
                   {infoMessage}
                 </div>
-              ) : null}
+              )}
 
               {/* OTP Field */}
               <div className="mt-4 sm:mt-5">

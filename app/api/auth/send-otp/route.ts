@@ -24,10 +24,11 @@ export async function POST(request: Request) {
     const result = await createAndSendOtp(phone, clientIp);
 
     if (!result.success) {
+      const isRateLimited = Boolean(result.retryAfterSeconds);
       return NextResponse.json(
         { error: result.error || "Unable to send verification code." },
         {
-          status: 429,
+          status: isRateLimited ? 429 : 400,
           headers: result.retryAfterSeconds
             ? { "Retry-After": String(result.retryAfterSeconds) }
             : undefined,
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
       success: true,
       message: result.message,
       retryAfterSeconds: result.retryAfterSeconds ?? 30,
-      devOtp: result.devOtp, // Only populated in dev / test mode
+      devOtp: process.env.NODE_ENV === "test" ? result.devOtp : undefined,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
