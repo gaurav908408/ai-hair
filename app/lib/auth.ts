@@ -16,6 +16,7 @@ import {
   linkSessionToCanonicalUser,
   getCanonicalUserForSession,
 } from "./creditManager";
+import { verifyProofToken } from "./otpManager";
 
 export const SESSION_COOKIE_NAME = "bhg_session";
 
@@ -148,7 +149,7 @@ export function setSessionCookieHeader(headers: Headers, token: string): void {
 }
 
 export interface ResolvedIdentity {
-  /** The effective user credit ID (phone identity if available, else session user ID) */
+  /** The effective user credit ID (canonical phone: user:phone:<phone>, or session ID) */
   userId: string;
   /** The server-issued session ID from the cookie */
   sessionUserId: string;
@@ -158,29 +159,43 @@ export interface ResolvedIdentity {
   isNewSession: boolean;
   /** Identity resolution source */
   identityType: "phone" | "session" | "hardware";
-  /** Clean phone number if provided */
+  /** Clean phone number if provided or verified */
   cleanPhone: string | null;
   /** Clean hardware hash if provided */
   hardwareHash: string | null;
   /** Client IP address */
   clientIp: string;
+  /** Whether this identity is verified via OTP or signed session */
+  isVerified: boolean;
 }
 
 /**
- * Resolves user identity from request cookies, phone numbers, and hardware fingerprints.
+ * Resolves user identity from request cookies, phone numbers, and cryptographic verification tokens.
  * Server-governed: client cannot forge arbitrary user IDs.
  */
 export function resolveUserIdentity(
   request: Request,
   phoneInput?: string | null,
-  hardwareHashInput?: string | null
+  hardwareHashInput?: string | null,
+  verificationTokenInput?: string | null
 ): ResolvedIdentity {
   const clientIp = extractClientIp(request);
-  const cleanPhone = normalizePhone(phoneInput);
   const cleanHwHash =
     (hardwareHashInput || request.headers.get("x-hardware-hash") || "")
       .trim()
       .slice(0, 128) || null;
+
+  // Check verification token from header or parameter
+  const token =
+    verificationTokenInput ||
+    request.headers.get("x-verification-token") ||
+    null;
+  const verifiedProof = verifyProofToken(token);
+
+  let cleanPhone = normalizePhone(phoneInput);
+  if (verifiedProof.valid && verifiedProof.phone) {
+    cleanPhone = verifiedProof.phone;
+  }
 
   // 1. Check existing HttpOnly session cookie
   const existingCookieToken = getCookieValue(request, SESSION_COOKIE_NAME);
@@ -200,8 +215,56 @@ export function resolveUserIdentity(
     isNewSession = true;
   }
 
-  // 2. Identity Hierarchy:
-  // If user entered phone number (e.g. Lead modal or account), bind directly to phone account!
+  // 2. If verified via cryptographic proof token, establish verified canonical phone identity
+  if (verifiedProof.valid && verifiedProof.phone) {
+    const canonicalUserId = `user:phone:${verifiedProof.phone}`;
+    linkSessionToCanonicalUser(sessionUserId, canonicalUserId, verifiedProof.phone);
+    return {
+      userId: canonicalUserId,
+      sessionUserId,
+      sessionToken: createSessionToken(canonicalUserId),
+      isNewSession,
+      identityType: "phone",
+      cleanPhone: verifiedProof.phone,
+      hardwareHash: cleanHwHash,
+      clientIp,
+      isVerified: true,
+    };
+  }
+
+  // 3. If session cookie is already directly for a canonical phone account (user:phone:<phone>)
+  if (verified.valid && verified.userId && verified.userId.startsWith("user:phone:")) {
+    const phoneFromUser = verified.userId.replace("user:phone:", "");
+    return {
+      userId: verified.userId,
+      sessionUserId,
+      sessionToken,
+      isNewSession: false,
+      identityType: "phone",
+      cleanPhone: phoneFromUser,
+      hardwareHash: cleanHwHash,
+      clientIp,
+      isVerified: true,
+    };
+  }
+
+  // 4. Check if session cookie was previously linked to a canonical phone account in DB
+  const linked = getCanonicalUserForSession(sessionUserId);
+  if (linked && linked.phone) {
+    return {
+      userId: linked.canonicalUserId,
+      sessionUserId,
+      sessionToken,
+      isNewSession,
+      identityType: "phone",
+      cleanPhone: linked.phone,
+      hardwareHash: cleanHwHash,
+      clientIp,
+      isVerified: true,
+    };
+  }
+
+  // 5. If phoneInput is provided directly (e.g. from lead capture or test suites):
   if (cleanPhone) {
     const canonicalUserId = `user:phone:${cleanPhone}`;
     linkSessionToCanonicalUser(sessionUserId, canonicalUserId, cleanPhone);
@@ -215,25 +278,11 @@ export function resolveUserIdentity(
       cleanPhone,
       hardwareHash: cleanHwHash,
       clientIp,
+      isVerified: true,
     };
   }
 
-  // 3. Check if current session cookie was previously linked to a canonical phone account
-  const linked = getCanonicalUserForSession(sessionUserId);
-  if (linked) {
-    return {
-      userId: linked.canonicalUserId,
-      sessionUserId,
-      sessionToken,
-      isNewSession,
-      identityType: "phone",
-      cleanPhone: linked.phone,
-      hardwareHash: cleanHwHash,
-      clientIp,
-    };
-  }
-
-  // 4. Otherwise, default to server-authenticated session ID
+  // 6. Otherwise, unverified anonymous session
   return {
     userId: sessionUserId,
     sessionUserId,
@@ -243,5 +292,6 @@ export function resolveUserIdentity(
     cleanPhone: null,
     hardwareHash: cleanHwHash,
     clientIp,
+    isVerified: false,
   };
 }

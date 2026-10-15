@@ -36,6 +36,11 @@ import {
   normalizePhone,
   SESSION_COOKIE_NAME,
 } from "../app/lib/auth";
+import {
+  createAndSendOtp,
+  verifySubmittedOtp,
+  verifyProofToken,
+} from "../app/lib/otpManager";
 
 // Configure test environment variables
 const TEST_DB_PATH = path.resolve(process.cwd(), "hair-gen/test/test-credits.db");
@@ -455,6 +460,115 @@ async function main() {
     const reloadedCredits = await getUserCredits(reloadIdentity.userId);
     assert.equal(reloadedCredits.creditsRemaining, 1, "Remaining credits must be 1 (not reset to 2)");
     assert.equal(reloadedCredits.creditsUsed, 1, "Credits used must be 1");
+  });
+
+  // Scenario 15: Phone OTP Verification Engine
+  await runAsyncTest("Phone OTP verification generates code, rejects bad attempts, and issues proof token", async () => {
+    const testPhone = "9812345678";
+
+    // 1. Send OTP
+    const sendRes = await createAndSendOtp(testPhone);
+    assert.equal(sendRes.success, true, "OTP send must succeed");
+    assert.ok(sendRes.devOtp, "Dev OTP must be returned in test environment");
+    const validOtp = sendRes.devOtp!;
+    assert.equal(validOtp.length, 6, "OTP must be 6 digits");
+
+    // 2. Cooldown enforced
+    const cooldownRes = await createAndSendOtp(testPhone);
+    assert.equal(cooldownRes.success, false, "Subsequent OTP request within 30s must be throttled");
+    assert.ok(cooldownRes.retryAfterSeconds! > 0, "Retry-After must be positive");
+
+    // 3. Reject invalid OTP code
+    const badVerify = await verifySubmittedOtp(testPhone, "000000");
+    assert.equal(badVerify.success, false, "Incorrect OTP must be rejected");
+
+    // 4. Accept valid OTP code and issue verification token
+    const goodVerify = await verifySubmittedOtp(testPhone, validOtp);
+    assert.equal(goodVerify.success, true, "Correct OTP must be accepted");
+    assert.ok(goodVerify.verificationToken, "Verification proof token must be issued");
+
+    // 5. Verify cryptographic proof token
+    const proof = verifyProofToken(goodVerify.verificationToken);
+    assert.equal(proof.valid, true, "Verification token must be cryptographically valid");
+    assert.equal(proof.phone, testPhone, "Verification token must match phone number");
+  });
+
+  // Scenario 16: Strict verified identity enforcement in resolveUserIdentity
+  await runAsyncTest("Strict verified identity enforcement: unverified rejected, verified accepted", async () => {
+    const verifiedPhone = "9823456789";
+    const otpRes = await createAndSendOtp(verifiedPhone);
+    const verifyRes = await verifySubmittedOtp(verifiedPhone, otpRes.devOtp!);
+    const validToken = verifyRes.verificationToken!;
+
+    // Case A: Unverified anonymous request without token or cookie
+    const anonReq = new Request("http://localhost:3000/api/hairstyle", { method: "POST" });
+    const anonIdentity = resolveUserIdentity(anonReq);
+    assert.equal(anonIdentity.isVerified, false, "Anonymous request must be unverified");
+
+    // Case B: Request with valid X-Verification-Token header
+    const verifiedReq = new Request("http://localhost:3000/api/hairstyle", {
+      method: "POST",
+      headers: {
+        "x-verification-token": validToken,
+      },
+    });
+    const verifiedIdentity = resolveUserIdentity(verifiedReq);
+    assert.equal(verifiedIdentity.isVerified, true, "Request with valid proof token must be verified");
+    assert.equal(verifiedIdentity.userId, `user:phone:${verifiedPhone}`);
+    assert.equal(verifiedIdentity.cleanPhone, verifiedPhone);
+  });
+
+  // Scenario 17: Incognito cross-browser isolation with OTP verification
+  await runAsyncTest("Incognito window verifying same phone sees 0 credits and is blocked", async () => {
+    const phone = "9834567890";
+    const normalOtp = await createAndSendOtp(phone);
+    const normalVerify = await verifySubmittedOtp(phone, normalOtp.devOtp!);
+
+    // Normal browser session consumes both daily credits
+    const normalReq = new Request("http://localhost:3000/api/hairstyle", {
+      method: "POST",
+      headers: { "x-verification-token": normalVerify.verificationToken! },
+    });
+    const normalId = resolveUserIdentity(normalReq);
+
+    // Consume all 2 credits
+    for (let i = 1; i <= 2; i++) {
+      const res = await reserveDailyCredit(normalId.userId);
+      assert.equal(res.success, true, `Generation ${i} must succeed`);
+    }
+
+    // 3rd generation in normal browser is blocked
+    const normal3rd = await reserveDailyCredit(normalId.userId);
+    assert.equal(normal3rd.success, false, "3rd generation in normal browser must be blocked");
+
+    // User opens Incognito: completely empty storage, new window
+    // In incognito, user submits same phone and verifies with OTP
+    const incognitoOtp = await createAndSendOtp(phone);
+    // Notice: if throttled, verify directly using same phone token or valid OTP
+    const incognitoToken = incognitoOtp.success
+      ? (await verifySubmittedOtp(phone, incognitoOtp.devOtp!)).verificationToken!
+      : normalVerify.verificationToken!;
+
+    const incognitoReq = new Request("http://localhost:3000/api/hairstyle", {
+      method: "POST",
+      headers: {
+        // No cookies from normal window!
+        "x-verification-token": incognitoToken,
+      },
+    });
+    const incognitoId = resolveUserIdentity(incognitoReq);
+    assert.equal(incognitoId.isVerified, true);
+    assert.equal(incognitoId.userId, `user:phone:${phone}`);
+
+    // Check balance in Incognito: MUST BE 0!
+    const incognitoBalance = await getUserCredits(incognitoId.userId);
+    assert.equal(incognitoBalance.creditsRemaining, 0, "Incognito user must see 0 remaining credits");
+    assert.equal(incognitoBalance.creditsUsed, 2, "Incognito user must see 2 credits used");
+
+    // Attempting generation in Incognito must be rejected!
+    const incognitoAttempt = await reserveDailyCredit(incognitoId.userId);
+    assert.equal(incognitoAttempt.success, false, "Incognito generation must be rejected with 0 credits");
+    assert.equal(incognitoAttempt.remaining, 0);
   });
 
   console.log("\n=======================================================");

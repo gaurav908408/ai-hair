@@ -13,10 +13,11 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const phoneParam = url.searchParams.get("phone");
+  const verificationToken = request.headers.get("x-verification-token");
   const hardwareHashHeader = request.headers.get("x-hardware-hash");
 
-  // 1. Server-side identity resolution (signed HttpOnly cookie + optional phone/hardware hash)
-  const identity = resolveUserIdentity(request, phoneParam, hardwareHashHeader);
+  // 1. Server-side identity resolution (signed HttpOnly cookie + optional verification token/phone)
+  const identity = resolveUserIdentity(request, phoneParam, hardwareHashHeader, verificationToken);
 
   // 2. Fetch authoritative credit balance from database
   const record = await getUserCredits(identity.userId, {
@@ -28,6 +29,7 @@ export async function GET(request: Request) {
   const response = NextResponse.json(
     {
       userId: identity.userId,
+      isVerified: identity.isVerified,
       limit: record.dailyCreditLimit,
       remaining: record.creditsRemaining,
       creditsUsed: record.creditsUsed,

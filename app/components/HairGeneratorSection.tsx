@@ -21,6 +21,7 @@ export default function HairGeneratorSection() {
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [pendingHairstyle, setPendingHairstyle] = useState<HairstyleOption | null>(null);
   const [leadPhone, setLeadPhone] = useState<string>("");
+  const [verificationToken, setVerificationToken] = useState<string>("");
   const [rateLimitInfo, setRateLimitInfo] = useState<{
     remaining: number;
     creditsUsed?: number;
@@ -36,16 +37,25 @@ export default function HairGeneratorSection() {
    * Fetches authoritative credit balance from backend database.
    * Consistent across tabs, reloads, and browser sessions.
    */
-  const fetchCreditStatus = useCallback(async (phone?: string) => {
+  const fetchCreditStatus = useCallback(async (phone?: string, token?: string) => {
     try {
       const visitor = await getVisitorIdentification();
       const phoneQuery = phone ? `?phone=${encodeURIComponent(phone)}` : "";
+      const headers: Record<string, string> = {
+        "X-Visitor-Id": visitor.visitorId,
+        "X-Hardware-Hash": visitor.hardwareHash,
+        "X-Device-Id": visitor.deviceId,
+      };
+      const activeToken =
+        token ||
+        verificationToken ||
+        (typeof window !== "undefined" ? localStorage.getItem("_bhg_verification_token") || "" : "");
+      if (activeToken) {
+        headers["X-Verification-Token"] = activeToken;
+      }
+
       const res = await fetch(`/api/rate-limit${phoneQuery}`, {
-        headers: {
-          "X-Visitor-Id": visitor.visitorId,
-          "X-Hardware-Hash": visitor.hardwareHash,
-          "X-Device-Id": visitor.deviceId,
-        },
+        headers,
         cache: "no-store",
       });
       if (!res.ok) return;
@@ -61,22 +71,28 @@ export default function HairGeneratorSection() {
     } catch {
       // silent network fallback
     }
-  }, []);
+  }, [verificationToken]);
 
   // 1. Initial credit fetch on mount (load remembered lead info from localStorage if available)
   useEffect(() => {
     let initialPhone = leadPhone;
+    let initialToken = verificationToken;
     try {
       const savedPhone = localStorage.getItem("_bhg_lead_phone");
+      const savedToken = localStorage.getItem("_bhg_verification_token");
       if (savedPhone && !initialPhone) {
         initialPhone = savedPhone;
         setLeadPhone(savedPhone);
       }
+      if (savedToken && !initialToken) {
+        initialToken = savedToken;
+        setVerificationToken(savedToken);
+      }
     } catch {
       // ignore
     }
-    fetchCreditStatus(initialPhone);
-  }, [fetchCreditStatus, leadPhone]);
+    fetchCreditStatus(initialPhone, initialToken);
+  }, [fetchCreditStatus, leadPhone, verificationToken]);
 
   // 2. Tab switching & window focus synchronization:
   // When user switches tabs or refocuses window, fetch the real balance from server
@@ -86,7 +102,10 @@ export default function HairGeneratorSection() {
         const currentPhone =
           leadPhone ||
           (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
-        fetchCreditStatus(currentPhone);
+        const currentToken =
+          verificationToken ||
+          (typeof window !== "undefined" ? localStorage.getItem("_bhg_verification_token") || "" : "");
+        fetchCreditStatus(currentPhone, currentToken);
       }
     };
 
@@ -94,7 +113,10 @@ export default function HairGeneratorSection() {
       const currentPhone =
         leadPhone ||
         (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
-      fetchCreditStatus(currentPhone);
+      const currentToken =
+        verificationToken ||
+        (typeof window !== "undefined" ? localStorage.getItem("_bhg_verification_token") || "" : "");
+      fetchCreditStatus(currentPhone, currentToken);
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -155,11 +177,15 @@ export default function HairGeneratorSection() {
     setPendingHairstyle(hairstyle);
     setGenerationError("");
 
-    // If user already submitted their lead phone in this browser, generate immediately!
+    // If user already verified their phone in this browser, generate immediately!
     const savedPhone =
       leadPhone ||
       (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
-    if (savedPhone) {
+    const savedToken =
+      verificationToken ||
+      (typeof window !== "undefined" ? localStorage.getItem("_bhg_verification_token") || "" : "");
+
+    if (savedPhone && savedToken) {
       const savedFirst =
         typeof window !== "undefined"
           ? localStorage.getItem("_bhg_lead_first_name") || "Guest"
@@ -172,6 +198,7 @@ export default function HairGeneratorSection() {
         firstName: savedFirst,
         lastName: savedLast,
         phone: savedPhone,
+        verificationToken: savedToken,
       });
       return;
     }
@@ -179,13 +206,24 @@ export default function HairGeneratorSection() {
     setShowLeadModal(true);
   };
 
-  const handleLeadSubmit = (leadDetails: { firstName: string; lastName: string; phone: string }) => {
+  const handleLeadSubmit = (leadDetails: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    verificationToken?: string;
+  }) => {
     setShowLeadModal(false);
     setLeadPhone(leadDetails.phone);
+    if (leadDetails.verificationToken) {
+      setVerificationToken(leadDetails.verificationToken);
+    }
     try {
       localStorage.setItem("_bhg_lead_phone", leadDetails.phone);
       localStorage.setItem("_bhg_lead_first_name", leadDetails.firstName);
       localStorage.setItem("_bhg_lead_last_name", leadDetails.lastName);
+      if (leadDetails.verificationToken) {
+        localStorage.setItem("_bhg_verification_token", leadDetails.verificationToken);
+      }
     } catch {
       // ignore
     }
@@ -202,7 +240,7 @@ export default function HairGeneratorSection() {
 
   const executeGeneration = async (
     hairstyle: HairstyleOption,
-    leadDetails?: { firstName: string; lastName: string; phone: string }
+    leadDetails?: { firstName: string; lastName: string; phone: string; verificationToken?: string }
   ) => {
     if (!photo || isGenerating) {
       return;
@@ -219,6 +257,11 @@ export default function HairGeneratorSection() {
       leadDetails?.phone ||
       leadPhone ||
       (typeof window !== "undefined" ? localStorage.getItem("_bhg_lead_phone") || "" : "");
+    const activeToken =
+      leadDetails?.verificationToken ||
+      verificationToken ||
+      (typeof window !== "undefined" ? localStorage.getItem("_bhg_verification_token") || "" : "");
+
     const requestId = ++generationRequestRef.current;
     setIsGenerating(true);
     setGenerationError("");
@@ -242,13 +285,22 @@ export default function HairGeneratorSection() {
         form.set("phone", currentPhone);
       }
 
+      if (activeToken) {
+        form.set("verificationToken", activeToken);
+      }
+
+      const reqHeaders: Record<string, string> = {
+        "X-Visitor-Id": visitor.visitorId,
+        "X-Hardware-Hash": visitor.hardwareHash,
+        "X-Device-Id": visitor.deviceId,
+      };
+      if (activeToken) {
+        reqHeaders["X-Verification-Token"] = activeToken;
+      }
+
       const response = await fetch("/api/hairstyle", {
         method: "POST",
-        headers: {
-          "X-Visitor-Id": visitor.visitorId,
-          "X-Hardware-Hash": visitor.hardwareHash,
-          "X-Device-Id": visitor.deviceId,
-        },
+        headers: reqHeaders,
         body: form,
       });
 
@@ -270,6 +322,7 @@ export default function HairGeneratorSection() {
       const result = (await response.json()) as {
         image?: string;
         error?: string;
+        requiresVerification?: boolean;
         rateLimit?: {
           limit: number;
           remaining: number;
@@ -292,6 +345,10 @@ export default function HairGeneratorSection() {
       }
 
       if (!response.ok) {
+        if (response.status === 401 || result.requiresVerification) {
+          setShowLeadModal(true);
+          throw new Error("Mobile verification required. Please verify with OTP to generate hairstyles.");
+        }
         if (response.status === 429 && result.rateLimit) {
           setRateLimitInfo({
             remaining: 0,
@@ -325,7 +382,7 @@ export default function HairGeneratorSection() {
         setIsGenerating(false);
       }
       // Re-synchronize credit balance from database
-      fetchCreditStatus(currentPhone);
+      fetchCreditStatus(currentPhone, activeToken);
     }
   };
 

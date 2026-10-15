@@ -465,14 +465,37 @@ export async function POST(request: Request) {
   }
 
   // 4. Server-Side Identity Resolution
-  // Extract user phone (from lead modal / account) and hardware hash (secondary signal)
+  // Extract user phone, verification token, and hardware hash
   const phoneInput =
     typeof form.get("phone") === "string" ? (form.get("phone") as string) : null;
   const hardwareHashInput =
     request.headers.get("x-hardware-hash") ||
     (typeof form.get("hardwareHash") === "string" ? (form.get("hardwareHash") as string) : null);
+  const verificationTokenInput =
+    request.headers.get("x-verification-token") ||
+    (typeof form.get("verificationToken") === "string"
+      ? (form.get("verificationToken") as string)
+      : null);
 
-  const identity = resolveUserIdentity(request, phoneInput, hardwareHashInput);
+  const identity = resolveUserIdentity(
+    request,
+    phoneInput,
+    hardwareHashInput,
+    verificationTokenInput
+  );
+
+  // Strict Phone Identity Enforcement:
+  // Generation strictly requires a valid phone number verified via OTP or signed session cookie.
+  if (!identity.isVerified || !identity.cleanPhone) {
+    return NextResponse.json(
+      {
+        error:
+          "Phone verification required. Please verify your mobile number with OTP to generate hairstyles.",
+        requiresVerification: true,
+      },
+      { status: 401 }
+    );
+  }
 
   // 5. Concurrency Control: Prevent parallel generation requests from the same user
   const lockAcquired = acquireConcurrencyLock(identity.userId);

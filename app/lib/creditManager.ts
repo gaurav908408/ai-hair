@@ -59,11 +59,14 @@ const DEFAULT_TIMEZONE = process.env.RESET_TIMEZONE || "Asia/Kolkata";
  * Returns the resolved absolute file path for the SQLite database.
  */
 export function getDatabaseFilePath(): string {
-  const dbFile =
-    process.env.RATE_LIMIT_DB_PATH || process.env.CREDIT_DB_PATH || "data/credits.db";
-  return path.isAbsolute(dbFile)
-    ? dbFile
-    : path.join(process.cwd(), "data", path.basename(dbFile || "credits.db"));
+  if (process.env.RATE_LIMIT_DB_PATH) return path.resolve(process.env.RATE_LIMIT_DB_PATH);
+  if (process.env.CREDIT_DB_PATH) return path.resolve(process.env.CREDIT_DB_PATH);
+
+  const inCwd = path.join(process.cwd(), "data", "credits.db");
+  const inHairGen = path.join(process.cwd(), "hair-gen", "data", "credits.db");
+  if (fs.existsSync(inCwd)) return inCwd;
+  if (fs.existsSync(inHairGen)) return inHairGen;
+  return inCwd;
 }
 
 interface SQLiteDatabaseSync {
