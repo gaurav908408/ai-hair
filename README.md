@@ -1,3 +1,4 @@
+
 # AI Hair Generator 💇‍♂️
 
 Transform your look with AI! AI Hair Generator allows you to visualize different hairstyles on your own photo before making a real-life change. Simply upload your photo, select a hairstyle, and see your AI-powered transformation.
@@ -6,22 +7,31 @@ Transform your look with AI! AI Hair Generator allows you to visualize different
 
 **[Visit AI Hair Generator](https://ai-hair-ten.vercel.app/)**
 
-## 📸 Screenshots
+## 📸 Project Screenshots
 
 ### 1. Homepage
-![AI Hair Generator Homepage](screenshots/01-homepage-hero.png)
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/8fa8d17d-21d6-4b28-8863-37227558aa61" alt="AI Hair Generator Homepage" width="100%" />
+</p>
 
 ### 2. Upload Photo & Select Hairstyle
-![Upload Photo and Hairstyle Selection](screenshots/02-upload-and-hairstyle-selection.png)
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/f103e492-2156-4167-9a87-239c4304be95" alt="Upload Photo and Hairstyle Selection" width="100%" />
+</p>
 
 ### 3. AI Transformation Result
-![AI Transformation Result](screenshots/03-ai-transformation-result.png)
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/e138220a-69e4-4408-8588-2cd882e1bf92" alt="AI Transformation Result" width="100%" />
+</p>
 
 ### 4. How It Works
-![How It Works](screenshots/04-how-it-works.png)
 
-### 5. Vercel Deployment
-![Vercel Deployment](screenshots/05-vercel-deployment.png)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/e2a7c635-951d-4ccf-b66f-d6cd767a9f31" alt="How AI Hair Generator Works" width="100%" />
+</p>
 
 ## ✨ Features
 
@@ -100,13 +110,6 @@ ai-hair/
 │
 ├── app/
 ├── public/
-├── screenshots/
-│   ├── 01-homepage-hero.png
-│   ├── 02-upload-and-hairstyle-selection.png
-│   ├── 03-ai-transformation-result.png
-│   ├── 04-how-it-works.png
-│   └── 05-vercel-deployment.png
-│
 ├── package.json
 ├── package-lock.json
 ├── next.config.ts
